@@ -1,0 +1,5 @@
+# Copy this file to sdkconfig.defaults.local and fill in your own Wi-Fi credentials.
+# The sdkconfig.defaults.local file is ignored by git.
+
+CONFIG_APP_WIFI_SSID="your-wifi-ssid"
+CONFIG_APP_WIFI_PASSWORD="your-wifi-password"
