@@ -1,0 +1,7 @@
+interface:
+  display_name: "Vibe Coding"
+  short_description: "ESP32 HomeKit repo conventions"
+  default_prompt: "Use $vibe-coding to work within this ESP32 HomeKit repository."
+
+policy:
+  allow_implicit_invocation: true

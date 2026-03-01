@@ -1,0 +1,62 @@
+# 脚本
+
+这个目录放的是本项目常用的本地开发脚本，目标是减少重复输入并统一 `ESP-IDF` 的调用方式。
+英文版说明见 [README.en.md](README.en.md)。
+
+## 常用脚本
+
+- `idf-run.sh`
+  公共入口，负责加载 `ESP-IDF` 环境并执行 `idf.py`
+- `build-device.sh`
+  通用构建入口，按设备类型执行 `reconfigure build`
+- `build-outlet.sh`
+  构建 `outlet`
+- `build-light.sh`
+  构建 `light`
+- `flash-device.sh`
+  通用烧录入口，按设备类型执行 `reconfigure flash`
+- `flash-outlet.sh`
+  烧录 `outlet`
+- `flash-light.sh`
+  烧录 `light`
+- `monitor.sh`
+  打开串口日志监视
+
+## 常用命令
+
+```sh
+./scripts/build-outlet.sh
+./scripts/build-light.sh
+./scripts/flash-outlet.sh -p /dev/cu.usbmodemXXXX
+./scripts/flash-light.sh -p /dev/cu.usbmodemXXXX
+./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
+```
+
+如果要透传更多 `idf.py` 参数，可以直接追加：
+
+```sh
+./scripts/build-light.sh -p /dev/cu.usbmodemXXXX reconfigure flash monitor
+./scripts/flash-light.sh -p /dev/cu.usbmodemXXXX erase-flash flash
+./scripts/monitor.sh -p /dev/cu.usbmodemXXXX -B build
+```
+
+## 编写新脚本
+
+建议遵循这些约定：
+
+1. 使用 `bash`，并加上 `set -euo pipefail`
+2. 优先复用 `idf-run.sh`，不要在每个脚本里重复写环境初始化
+3. 文件名按动作命名，例如 `build-*`、`flash-*`、`monitor-*`
+4. 不要把端口号、Wi-Fi 凭据之类的本地信息写死在脚本里
+5. 让“默认行为”清晰，比如没有参数时执行什么命令
+
+最小模板：
+
+```bash
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec "$SCRIPT_DIR/idf-run.sh" "$@"
+```

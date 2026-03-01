@@ -1,25 +1,23 @@
 # ESP32 HomeKit
 
-这是一个基于 Espressif `esp-homekit-sdk` 的 `ESP32-C3` HomeKit 示例工程。
-当前仓库内置 `outlet` 和 `light` 两种设备类型。
+This is an `ESP32-C3` HomeKit demo project based on Espressif `esp-homekit-sdk`.
+The repository currently ships with two device variants: `outlet` and `light`.
 
-英文版文档见 [README.en.md](README.en.md)。
+## Prerequisites
 
-## 前置依赖
+- Install `ESP-IDF 5.4.2`, typically at `$HOME/.espressif/frameworks/esp-idf-v5.4.2`
+- Connect a working `ESP32-C3` development board
+- Keep Wi-Fi credentials in the local override file instead of tracked defaults
 
-- 已安装 `ESP-IDF 5.4.2`，默认路径是 `$HOME/.espressif/frameworks/esp-idf-v5.4.2`
-- 已连接一块可用的 `ESP32-C3` 开发板
-- 使用本地文件保存 Wi-Fi 凭据，不要直接改仓库默认配置
-
-准备本地 Wi-Fi 配置：
+Prepare local Wi-Fi config:
 
 ```sh
 cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 ```
 
-## 快捷脚本
+## Quick Scripts
 
-最常用的脚本：
+Most common commands:
 
 ```sh
 ./scripts/build-outlet.sh
@@ -27,7 +25,7 @@ cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
 
-切到 `light`：
+Switch to `light`:
 
 ```sh
 ./scripts/build-light.sh
@@ -35,9 +33,9 @@ cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
 
-## 纯手动命令
+## Manual Build, Flash, and Monitor
 
-第一次构建或切换过目标芯片时：
+Run this once for the first build, or after changing the target chip:
 
 ```sh
 export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
@@ -45,7 +43,7 @@ export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
 idf.py set-target esp32c3
 ```
 
-手动构建 `outlet`：
+Build `outlet` manually:
 
 ```sh
 export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
@@ -53,7 +51,7 @@ export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
 HOMEKIT_DEVICE_TYPE=outlet idf.py reconfigure build
 ```
 
-手动构建 `light`：
+Build `light` manually:
 
 ```sh
 export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
@@ -61,7 +59,7 @@ export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
 HOMEKIT_DEVICE_TYPE=light idf.py reconfigure build
 ```
 
-手动烧录与监控：
+Flash and monitor manually:
 
 ```sh
 export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
@@ -70,9 +68,9 @@ idf.py -p /dev/cu.usbmodemXXXX flash
 idf.py -p /dev/cu.usbmodemXXXX monitor
 ```
 
-## 更多文档
+## More Docs
 
-- [docs/README.md](docs/README.md)
-- [scripts/README.md](scripts/README.md)
-- [devices/README.md](devices/README.md)
-- [skills/README.md](skills/README.md)
+- [docs/README.en.md](docs/README.en.md)
+- [scripts/README.en.md](scripts/README.en.md)
+- [devices/README.en.md](devices/README.en.md)
+- [skills/README.en.md](skills/README.en.md)
