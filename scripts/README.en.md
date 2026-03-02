@@ -44,8 +44,9 @@ You can append extra `idf.py` arguments directly:
 ```
 
 `build-device.sh`, `flash-device.sh`, and `flash-device.ps1` delete
-`sdkconfig` and `sdkconfig.old` before running so the latest
-`sdkconfig.defaults.local` values are always regenerated into a fresh config.
+`sdkconfig` and `sdkconfig.old` before running, while preserving the current
+target from `sdkconfig` when available, so the latest `sdkconfig.defaults.local`
+values are always regenerated into a fresh config.
 
 ## How to Add a New Script
 

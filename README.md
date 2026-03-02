@@ -18,7 +18,7 @@ cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 ```
 
 说明：`build-device.sh`、`flash-device.sh` 和 `flash-device.ps1` 会在每次执行前删除 `sdkconfig` 与 `sdkconfig.old`，
-确保 `sdkconfig.defaults.local` 的最新改动会重新生成到新的配置文件里。
+并优先保留当前 `sdkconfig` 里的目标芯片设置，确保 `sdkconfig.defaults.local` 的最新改动会重新生成到新的配置文件里。
 
 ## 快捷脚本
 

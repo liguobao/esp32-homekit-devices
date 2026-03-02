@@ -17,8 +17,31 @@ if (-not (Test-Path $idfRun)) {
     throw "Shared PowerShell entry point not found: $idfRun"
 }
 
+function Get-ConfigTarget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigPath
+    )
+
+    if (-not (Test-Path $ConfigPath)) {
+        return $null
+    }
+
+    $match = Select-String -Path $ConfigPath -Pattern '^CONFIG_IDF_TARGET="([^"]+)"$' | Select-Object -First 1
+    if (-not $match) {
+        return $null
+    }
+
+    return $match.Matches[0].Groups[1].Value
+}
+
 if (-not $IdfArgs -or $IdfArgs.Count -eq 0) {
     $IdfArgs = @("reconfigure", "flash")
+}
+
+$idfTarget = Get-ConfigTarget -ConfigPath (Join-Path $projectDir "sdkconfig")
+if (-not $idfTarget) {
+    $idfTarget = Get-ConfigTarget -ConfigPath (Join-Path $projectDir "sdkconfig.defaults")
 }
 
 $sdkconfigFiles = @(
@@ -31,4 +54,11 @@ foreach ($sdkconfigFile in $sdkconfigFiles) {
     }
 }
 
-& $idfRun "-DHOMEKIT_DEVICE_TYPE=$DeviceType" @IdfArgs
+$forwardArgs = @()
+if ($idfTarget) {
+    $forwardArgs += "-DIDF_TARGET=$idfTarget"
+}
+$forwardArgs += "-DHOMEKIT_DEVICE_TYPE=$DeviceType"
+$forwardArgs += $IdfArgs
+
+& $idfRun @forwardArgs

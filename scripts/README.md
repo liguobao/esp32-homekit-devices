@@ -44,8 +44,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\idf-run.ps1 --version
 ```
 
 `build-device.sh`、`flash-device.sh` 和 `flash-device.ps1` 会在执行前删除
-`sdkconfig` 与 `sdkconfig.old`，这样 `sdkconfig.defaults.local` 的最新改动
-会被重新生成到新的配置文件里。
+`sdkconfig` 与 `sdkconfig.old`，并优先保留当前 `sdkconfig` 里的目标芯片设置，
+这样 `sdkconfig.defaults.local` 的最新改动会被重新生成到新的配置文件里。
 
 ## 编写新脚本
 

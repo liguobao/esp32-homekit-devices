@@ -16,8 +16,8 @@ cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 ```
 
 Note: `build-device.sh`, `flash-device.sh`, and `flash-device.ps1` delete `sdkconfig` and `sdkconfig.old`
-before each run so the latest `sdkconfig.defaults.local` changes are always rebuilt
-into a fresh config.
+before each run, while preserving the current target from `sdkconfig` when available,
+so the latest `sdkconfig.defaults.local` changes are always rebuilt into a fresh config.
 
 ## Quick Scripts
 
