@@ -36,4 +36,4 @@
   Keep Chinese content in the main `.md` file and put English content in a separate `.en.md` file.
 
 - Running common tasks:
-  Prefer `scripts/build-*.sh`, `scripts/flash-*.sh`, and `scripts/monitor.sh`.
+  Prefer `scripts/build-device.sh`, `scripts/flash-device.sh`, `scripts/flash-device.ps1`, and `scripts/monitor.sh`.

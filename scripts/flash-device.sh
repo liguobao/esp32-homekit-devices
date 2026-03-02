@@ -24,4 +24,6 @@ if [[ $# -eq 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+rm -f "$PROJECT_DIR/sdkconfig" "$PROJECT_DIR/sdkconfig.old"
 exec "$SCRIPT_DIR/idf-run.sh" -DHOMEKIT_DEVICE_TYPE="$DEVICE_TYPE" "$@"

@@ -17,22 +17,59 @@
 cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 ```
 
+说明：`build-device.sh`、`flash-device.sh` 和 `flash-device.ps1` 会在每次执行前删除 `sdkconfig` 与 `sdkconfig.old`，
+确保 `sdkconfig.defaults.local` 的最新改动会重新生成到新的配置文件里。
+
 ## 快捷脚本
 
 最常用的脚本：
 
 ```sh
-./scripts/build-outlet.sh
-./scripts/flash-outlet.sh -p /dev/cu.usbmodemXXXX
+./scripts/build-device.sh outlet
+./scripts/flash-device.sh outlet -p /dev/cu.usbmodemXXXX
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
 
 切到 `light`：
 
 ```sh
-./scripts/build-light.sh
-./scripts/flash-light.sh -p /dev/cu.usbmodemXXXX
+./scripts/build-device.sh light
+./scripts/flash-device.sh light -p /dev/cu.usbmodemXXXX
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
+```
+
+## Windows (PowerShell)
+
+如果在 Windows 上使用普通 `PowerShell`，先设置目标芯片，再执行脚本或纯 `idf.py` 命令。
+默认示例仍以 `ESP32-C3` 为目标；如果使用经典 `ESP32` 开发板，请把下面命令里的 `esp32c3` 改成 `esp32`。
+
+```powershell
+Copy-Item sdkconfig.defaults.local.example sdkconfig.defaults.local
+
+$idfPath = "$env:USERPROFILE\.espressif\frameworks\esp-idf-v5.4.2"
+cmd /c """$idfPath\export.bat"" && idf.py set-target esp32c3"
+```
+
+使用 PowerShell 脚本烧录：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 outlet -p COM5
+cmd /c """$idfPath\export.bat"" && idf.py -p COM5 monitor"
+```
+
+如果不用脚本，直接执行 `idf.py`：
+
+```powershell
+Remove-Item .\sdkconfig, .\sdkconfig.old -Force -ErrorAction SilentlyContinue
+cmd /c """$idfPath\export.bat"" && idf.py -DHOMEKIT_DEVICE_TYPE=outlet -p COM5 reconfigure flash"
+cmd /c """$idfPath\export.bat"" && idf.py -p COM5 monitor"
+```
+
+如果只想重新编译、不烧录：
+
+```powershell
+Remove-Item .\sdkconfig, .\sdkconfig.old -Force -ErrorAction SilentlyContinue
+cmd /c """$idfPath\export.bat"" && idf.py -DHOMEKIT_DEVICE_TYPE=outlet reconfigure build"
 ```
 
 ## 纯手动命令

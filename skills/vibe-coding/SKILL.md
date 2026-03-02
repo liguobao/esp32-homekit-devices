@@ -12,4 +12,4 @@ Use this skill when working inside this repository.
 - Read `references/project.md` first for repo layout and constraints.
 - Keep root `README.md` minimal; move detailed docs into `docs/`, `scripts/README.md`, or `devices/README.md`.
 - Reuse the existing shared bootstrap in `main/app_main.c` and keep device behavior in `devices/<type>/`.
-- Prefer `scripts/build-*.sh`, `scripts/flash-*.sh`, and `scripts/monitor.sh` for common local tasks.
+- Prefer `scripts/build-device.sh`, `scripts/flash-device.sh`, `scripts/flash-device.ps1`, and `scripts/monitor.sh` for common local tasks.

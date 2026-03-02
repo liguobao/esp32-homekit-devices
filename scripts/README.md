@@ -7,38 +7,45 @@
 
 - `idf-run.sh`
   公共入口，负责加载 `ESP-IDF` 环境并执行 `idf.py`
+- `idf-run.ps1`
+  Windows PowerShell 公共入口，负责加载 `ESP-IDF` 环境并执行 `idf.py`
 - `build-device.sh`
   通用构建入口，按设备类型执行 `reconfigure build`
-- `build-outlet.sh`
-  构建 `outlet`
-- `build-light.sh`
-  构建 `light`
 - `flash-device.sh`
   通用烧录入口，按设备类型执行 `reconfigure flash`
-- `flash-outlet.sh`
-  烧录 `outlet`
-- `flash-light.sh`
-  烧录 `light`
+- `flash-device.ps1`
+  Windows PowerShell 烧录入口，按设备类型执行 `reconfigure flash`
 - `monitor.sh`
   打开串口日志监视
 
 ## 常用命令
 
 ```sh
-./scripts/build-outlet.sh
-./scripts/build-light.sh
-./scripts/flash-outlet.sh -p /dev/cu.usbmodemXXXX
-./scripts/flash-light.sh -p /dev/cu.usbmodemXXXX
+./scripts/build-device.sh outlet
+./scripts/build-device.sh light
+./scripts/flash-device.sh outlet -p /dev/cu.usbmodemXXXX
+./scripts/flash-device.sh light -p /dev/cu.usbmodemXXXX
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
+```
+
+Windows PowerShell：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 outlet -p COM5
+powershell -ExecutionPolicy Bypass -File .\scripts\idf-run.ps1 --version
 ```
 
 如果要透传更多 `idf.py` 参数，可以直接追加：
 
 ```sh
-./scripts/build-light.sh -p /dev/cu.usbmodemXXXX reconfigure flash monitor
-./scripts/flash-light.sh -p /dev/cu.usbmodemXXXX erase-flash flash
+./scripts/build-device.sh light -p /dev/cu.usbmodemXXXX reconfigure flash monitor
+./scripts/flash-device.sh light -p /dev/cu.usbmodemXXXX erase-flash flash
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX -B build
 ```
+
+`build-device.sh`、`flash-device.sh` 和 `flash-device.ps1` 会在执行前删除
+`sdkconfig` 与 `sdkconfig.old`，这样 `sdkconfig.defaults.local` 的最新改动
+会被重新生成到新的配置文件里。
 
 ## 编写新脚本
 

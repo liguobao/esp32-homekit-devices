@@ -36,4 +36,4 @@
   中文内容放在主 `.md` 文件里，英文内容放在对应的 `.en.md` 文件里
 
 - 日常本地操作：
-  优先使用 `scripts/build-*.sh`、`scripts/flash-*.sh` 和 `scripts/monitor.sh`
+  优先使用 `scripts/build-device.sh`、`scripts/flash-device.sh`、`scripts/flash-device.ps1` 和 `scripts/monitor.sh`
