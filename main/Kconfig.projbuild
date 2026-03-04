@@ -187,9 +187,11 @@ menu "Example Configuration"
 
         config HOMEKIT_DASHBOARD_SPI_CLOCK_HZ
             int "Dashboard SPI clock (Hz)"
-            default 20000000
+            default 10000000
             help
                 Shared SPI pixel clock used by both panels.
+                10 MHz is a safe default for most ST7789 and NV3007 strips;
+                raise to 20000000 only if your panel supports it.
 
         menu "Left ST7789 Strip"
 
@@ -260,6 +262,20 @@ menu "Example Configuration"
             config HOMEKIT_DASHBOARD_RIGHT_DC
                 int "Right NV3007 DC GPIO"
                 default 14
+
+            config HOMEKIT_DASHBOARD_RIGHT_SCLK
+                int "Right NV3007 dedicated SCLK GPIO (-1 = share ST7789's SPI bus)"
+                default -1
+                help
+                    Set to a valid GPIO to use an independent software-SPI clock
+                    for the NV3007. Leave at -1 to share the shared SPI2 SCLK.
+
+            config HOMEKIT_DASHBOARD_RIGHT_MOSI
+                int "Right NV3007 dedicated MOSI GPIO (-1 = share ST7789's SPI bus)"
+                default -1
+                help
+                    Set to a valid GPIO to use an independent software-SPI data
+                    pin for the NV3007. Leave at -1 to share the shared SPI2 MOSI.
 
             config HOMEKIT_DASHBOARD_RIGHT_RST
                 int "Right NV3007 reset GPIO"

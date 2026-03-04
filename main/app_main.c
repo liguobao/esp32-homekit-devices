@@ -102,6 +102,19 @@ static void reset_key_init(uint32_t key_gpio_pin)
     iot_button_add_on_press_cb(handle, RESET_TO_FACTORY_BUTTON_TIMEOUT, reset_to_factory_handler, NULL);
 }
 
+static bool should_init_reset_key(const homekit_device_t *device)
+{
+#if CONFIG_IDF_TARGET_ESP32C3
+    if (device && device->uses_custom_display && RESET_GPIO == GPIO_NUM_9) {
+        ESP_LOGW(TAG, "Skipping reset key on GPIO9 because it conflicts with the dashboard display wiring");
+        return false;
+    }
+#else
+    (void) device;
+#endif
+    return true;
+}
+
 /* The main thread for handling the selected device profile. */
 static void device_thread_entry(void *arg)
 {
@@ -193,7 +206,9 @@ static void device_thread_entry(void *arg)
 
     /* Register a common button for reset Wi-Fi network and reset to factory.
      */
-    reset_key_init(RESET_GPIO);
+    if (should_init_reset_key(device)) {
+        reset_key_init(RESET_GPIO);
+    }
 
     /* TODO: Do the actual hardware initialization here */
 

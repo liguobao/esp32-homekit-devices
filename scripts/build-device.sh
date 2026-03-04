@@ -32,9 +32,20 @@ get_idf_target() {
     sed -n 's/^CONFIG_IDF_TARGET="\([^"]*\)"/\1/p' "$config_file" | head -n 1
 }
 
-IDF_TARGET_VALUE="$(get_idf_target "$PROJECT_DIR/sdkconfig" || true)"
+get_cached_build_target() {
+    local cache_file="$1"
+    [[ -f "$cache_file" ]] || return 1
+    sed -n 's/^IDF_TARGET:STRING=\(.*\)$/\1/p' "$cache_file" | head -n 1
+}
+
+IDF_TARGET_VALUE="$(get_idf_target "$PROJECT_DIR/sdkconfig.defaults" || true)"
 if [[ -z "$IDF_TARGET_VALUE" ]]; then
-    IDF_TARGET_VALUE="$(get_idf_target "$PROJECT_DIR/sdkconfig.defaults" || true)"
+    IDF_TARGET_VALUE="$(get_idf_target "$PROJECT_DIR/sdkconfig" || true)"
+fi
+
+BUILD_TARGET_VALUE="$(get_cached_build_target "$PROJECT_DIR/build/CMakeCache.txt" || true)"
+if [[ -n "$IDF_TARGET_VALUE" && -n "$BUILD_TARGET_VALUE" && "$IDF_TARGET_VALUE" != "$BUILD_TARGET_VALUE" ]]; then
+    rm -rf "$PROJECT_DIR/build"
 fi
 
 rm -f "$PROJECT_DIR/sdkconfig" "$PROJECT_DIR/sdkconfig.old"

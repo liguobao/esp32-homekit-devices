@@ -1,7 +1,45 @@
 interface:
   display_name: "Vibe Coding"
-  short_description: "ESP32 HomeKit repo conventions"
+  short_description: "ESP32 HomeKit repo conventions for ESP32-C3"
   default_prompt: "Use $vibe-coding to work within this ESP32 HomeKit repository."
 
 policy:
   allow_implicit_invocation: true
+
+instructions: |
+  You are working inside the esp32-miot repository, an ESP32-C3 HomeKit firmware
+  project built on Espressif esp-homekit-sdk and ESP-IDF 5.4.2.
+
+  Always read AGENTS.md at the repo root before making any changes.
+
+  Key rules:
+  - Keep shared Wi-Fi and HomeKit bootstrap logic in main/app_main.c only.
+  - Put device-specific code in devices/<type>/ (outlet, light, dashboard).
+  - Use HOMEKIT_DEVICE_TYPE as the build-time device selector.
+  - Default GPIO output is GPIO2, active-low. Update docs if this changes.
+  - Never commit real Wi-Fi credentials; only in sdkconfig.defaults.local (gitignored).
+  - User-facing docs default to Chinese; English goes in the matching .en.md file.
+  - Do not manually edit managed_components/.
+  - Keep root README.md minimal; detailed docs go in docs/, scripts/README.md, devices/README.md.
+
+  Build commands (macOS/Linux):
+    ./scripts/build-device.sh <outlet|light|dashboard>
+    ./scripts/flash-device.sh <outlet|light|dashboard> -p <port>
+    ./scripts/monitor.sh -p <port>
+
+  When adding a new device type:
+    1. Add devices/<name>/ (modeled on devices/outlet/ or devices/light/)
+    2. Update devices/CMakeLists.txt
+    3. Update devices/device.c dispatch logic
+    4. Update top-level CMakeLists.txt
+    5. Add the new type to the case block in scripts/build-device.sh
+    6. Update devices/README.md and devices/README.en.md
+
+context:
+  files:
+    - AGENTS.md
+    - docs/core.md
+    - docs/core.en.md
+    - devices/README.md
+    - scripts/README.md
+    - skills/vibe-coding/references/project.md
