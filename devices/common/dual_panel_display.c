@@ -110,7 +110,9 @@ static const char *TAG = "dual_panel";
 #define RIGHT_BODY_SCALE 2
 #define LEFT_TIME_TEXT_LEN 24
 #define LEFT_DETAIL_TEXT_LEN 64
-#define LEFT_POEM_TEXT_LEN 48
+#define LEFT_POEM_TEXT_LEN 64
+#define CJK_GLYPH_WIDTH 16
+#define CJK_GLYPH_HEIGHT 16
 #define POEM_REFRESH_SEC (5 * 60)
 #define PANEL_CMD_DELAY 0xFE
 #define PANEL_CMD_END 0x00
@@ -122,6 +124,11 @@ typedef struct {
     char code;
     uint8_t rows[FONT_HEIGHT];
 } font_glyph_t;
+
+typedef struct {
+    uint16_t codepoint;
+    uint8_t rows[CJK_GLYPH_HEIGHT * 2];
+} cjk16_glyph_t;
 
 typedef enum {
     PANEL_CONTROLLER_ST7789 = 0,
@@ -213,6 +220,33 @@ static const font_glyph_t s_font[] = {
     { 'X', {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11} },
     { 'Y', {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04} },
     { 'Z', {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F} },
+};
+
+static const cjk16_glyph_t s_cjk16_font[] = {
+    { 0x6625, {0x01, 0x00, 0x01, 0x00, 0x3F, 0xFC, 0x01, 0x00, 0x1F, 0xFC, 0x02, 0x00, 0x7F, 0xFE, 0x0C, 0x20, 0x08, 0x10, 0x1F, 0xF8, 0x68, 0x16, 0x4F, 0xF2, 0x08, 0x10, 0x08, 0x10, 0x0F, 0xF0, 0x08, 0x10} }, /* 春 */
+    { 0x7720, {0x7D, 0xFC, 0x45, 0x04, 0x45, 0x04, 0x45, 0x04, 0x7D, 0xFC, 0x45, 0x10, 0x45, 0x10, 0x45, 0xFE, 0x7D, 0x10, 0x45, 0x10, 0x45, 0x10, 0x45, 0x08, 0x7D, 0x0A, 0x45, 0xE6, 0x00, 0x00, 0x00, 0x00} }, /* 眠 */
+    { 0x4E0D, {0x7F, 0xFE, 0x00, 0x80, 0x01, 0x00, 0x03, 0x00, 0x03, 0x60, 0x05, 0x30, 0x09, 0x18, 0x31, 0x04, 0x61, 0x02, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00} }, /* 不 */
+    { 0x89C9, {0x01, 0x00, 0x19, 0x18, 0x08, 0x90, 0x7F, 0xFE, 0x40, 0x02, 0x40, 0x02, 0x4F, 0xF2, 0x08, 0x10, 0x09, 0x10, 0x09, 0x10, 0x09, 0x10, 0x09, 0xD0, 0x03, 0xC2, 0x06, 0xC2, 0x78, 0x7C, 0x00, 0x00} }, /* 觉 */
+    { 0x6653, {0x00, 0x40, 0x78, 0x4E, 0x4B, 0xF0, 0x48, 0x48, 0x48, 0x38, 0x48, 0x32, 0x48, 0xD2, 0x7B, 0x0E, 0x48, 0x00, 0x4B, 0xFE, 0x48, 0x90, 0x48, 0x90, 0x78, 0x90, 0x41, 0x12, 0x06, 0x1E, 0x00, 0x00} }, /* 晓 */
+    { 0x660E, {0x00, 0xFE, 0x7E, 0x82, 0x22, 0x82, 0x22, 0x82, 0x22, 0xFE, 0x3E, 0x82, 0x22, 0x82, 0x22, 0x82, 0x22, 0xFE, 0x3E, 0x82, 0x63, 0x82, 0x01, 0x02, 0x03, 0x02, 0x06, 0x1C, 0x00, 0x00, 0x00, 0x00} }, /* 明 */
+    { 0x6708, {0x0F, 0xF8, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0F, 0xF8, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x1F, 0xF8, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x20, 0x08, 0x60, 0x78, 0x00, 0x00, 0x00, 0x00} }, /* 月 */
+    { 0x677E, {0x10, 0x00, 0x10, 0xD0, 0x10, 0x88, 0x10, 0x88, 0x7C, 0x84, 0x11, 0x04, 0x1B, 0x22, 0x34, 0x42, 0x34, 0x40, 0x50, 0x40, 0x50, 0x88, 0x10, 0x8C, 0x10, 0x84, 0x11, 0x3E, 0x13, 0xC2, 0x10, 0x00} }, /* 松 */
+    { 0x95F4, {0x13, 0xFE, 0x18, 0x06, 0x08, 0x06, 0x40, 0x06, 0x47, 0xE6, 0x44, 0x26, 0x44, 0x26, 0x47, 0xE6, 0x44, 0x26, 0x44, 0x26, 0x44, 0x26, 0x47, 0xE6, 0x44, 0x06, 0x44, 0x06, 0x40, 0x1C, 0x00, 0x00} }, /* 间 */
+    { 0x7167, {0x3D, 0xFE, 0x24, 0x42, 0x24, 0x42, 0x24, 0x84, 0x3D, 0x1C, 0x24, 0x00, 0x25, 0xFC, 0x25, 0x04, 0x25, 0x04, 0x3D, 0xFC, 0x00, 0x00, 0x12, 0x4C, 0x22, 0x44, 0x62, 0x42, 0x00, 0x00, 0x00, 0x00} }, /* 照 */
+    { 0x5C71, {0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x3F, 0xFC, 0x00, 0x04, 0x00, 0x00} }, /* 山 */
+    { 0x6C14, {0x08, 0x00, 0x08, 0x00, 0x1F, 0xFC, 0x10, 0x00, 0x20, 0x00, 0x6F, 0xF8, 0x40, 0x00, 0x3F, 0xF0, 0x00, 0x10, 0x00, 0x10, 0x00, 0x10, 0x00, 0x12, 0x00, 0x0A, 0x00, 0x0A, 0x00, 0x06, 0x00, 0x00} }, /* 气 */
+    { 0x65E5, {0x1F, 0xF8, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x1F, 0xF8, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x1F, 0xF8, 0x10, 0x08, 0x00, 0x00, 0x00, 0x00} }, /* 日 */
+    { 0x5915, {0x01, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0xFC, 0x04, 0x0C, 0x0C, 0x08, 0x18, 0x08, 0x33, 0x10, 0x21, 0xB0, 0x00, 0x60, 0x00, 0x40, 0x00, 0x80, 0x01, 0x00, 0x06, 0x00, 0x1C, 0x00, 0x10, 0x00} }, /* 夕 */
+    { 0x4F73, {0x08, 0x40, 0x08, 0x40, 0x18, 0x40, 0x17, 0xFC, 0x30, 0x40, 0x30, 0x40, 0x57, 0xFE, 0xD0, 0x00, 0x10, 0x40, 0x10, 0x40, 0x17, 0xFE, 0x10, 0x40, 0x10, 0x40, 0x10, 0x40, 0x1F, 0xFE, 0x30, 0x00} }, /* 佳 */
+    { 0x591C, {0x01, 0x80, 0x7F, 0xFE, 0x00, 0x80, 0x08, 0x80, 0x09, 0xFC, 0x11, 0x04, 0x32, 0x48, 0x77, 0x28, 0x5D, 0x10, 0x10, 0x90, 0x10, 0x60, 0x10, 0xE0, 0x11, 0x98, 0x17, 0x0E, 0x14, 0x02, 0x00, 0x00} }, /* 夜 */
+    { 0x534A, {0x01, 0x00, 0x21, 0x08, 0x11, 0x08, 0x09, 0x10, 0x0D, 0x30, 0x01, 0x00, 0x3F, 0xFC, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x7F, 0xFE, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00} }, /* 半 */
+    { 0x949F, {0x10, 0x30, 0x20, 0x20, 0x3E, 0x20, 0x40, 0x20, 0x41, 0xFE, 0x3D, 0x22, 0x11, 0x22, 0x11, 0x22, 0x11, 0x22, 0x7F, 0xFE, 0x11, 0x22, 0x10, 0x20, 0x12, 0x20, 0x16, 0x20, 0x18, 0x20, 0x00, 0x30} }, /* 钟 */
+    { 0x58F0, {0x01, 0x80, 0x01, 0x00, 0x7F, 0xFE, 0x01, 0x00, 0x01, 0x00, 0x3F, 0xFC, 0x00, 0x00, 0x1F, 0xF8, 0x11, 0x08, 0x11, 0x08, 0x1F, 0xF8, 0x20, 0x08, 0x20, 0x00, 0x20, 0x00, 0x40, 0x00, 0x40, 0x00} }, /* 声 */
+    { 0x5230, {0x7F, 0xA2, 0x08, 0x22, 0x13, 0x22, 0x11, 0x22, 0x27, 0xA2, 0x78, 0xE2, 0x04, 0x22, 0x04, 0x22, 0x3F, 0xA2, 0x04, 0x22, 0x04, 0x22, 0x05, 0x82, 0x7E, 0x02, 0x00, 0x1E, 0x00, 0x00, 0x00, 0x00} }, /* 到 */
+    { 0x6C5F, {0x20, 0x00, 0x13, 0xFE, 0x08, 0x40, 0x00, 0x40, 0x60, 0x40, 0x30, 0x40, 0x10, 0x40, 0x00, 0x40, 0x00, 0x40, 0x10, 0x40, 0x10, 0x40, 0x20, 0x40, 0x67, 0xFE, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00} }, /* 江 */
+    { 0x6E05, {0x00, 0x40, 0x20, 0x40, 0x17, 0xFE, 0x00, 0x40, 0x07, 0xFC, 0x40, 0x40, 0x37, 0xFE, 0x10, 0x00, 0x03, 0xFC, 0x02, 0x04, 0x13, 0xFC, 0x12, 0x04, 0x23, 0xFC, 0x62, 0x04, 0x42, 0x1C, 0x00, 0x00} }, /* 清 */
+    { 0x8FD1, {0x00, 0x04, 0x60, 0x1C, 0x31, 0xE0, 0x11, 0x00, 0x01, 0x00, 0x01, 0xFE, 0x01, 0x10, 0x71, 0x10, 0x11, 0x10, 0x11, 0x10, 0x12, 0x10, 0x12, 0x10, 0x32, 0x10, 0x6C, 0x00, 0x47, 0xFE, 0x00, 0x00} }, /* 近 */
+    { 0x4EBA, {0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x02, 0x40, 0x02, 0x40, 0x06, 0x20, 0x04, 0x30, 0x08, 0x18, 0x10, 0x0C, 0x60, 0x06, 0x00, 0x00, 0x00, 0x00} }, /* 人 */
 };
 
 static dashboard_panel_t s_left_panel;
@@ -324,12 +358,13 @@ static const uint8_t s_nv3007_init_seq[] = {
     PANEL_CMD_END, 0
 };
 
-static const uint16_t s_left_background = RGB565(9, 26, 52);
-static const uint16_t s_left_header = RGB565(22, 82, 151);
-static const uint16_t s_left_text = RGB565(240, 244, 248);
-static const uint16_t s_left_secondary = RGB565(190, 210, 228);
-static const uint16_t s_left_poem_background = RGB565(60, 44, 92);
-static const uint16_t s_left_poem_text = RGB565(250, 231, 196);
+static const uint16_t s_left_background = RGB565(82, 178, 122);
+static const uint16_t s_left_header = RGB565(244, 124, 72);
+static const uint16_t s_left_text = RGB565(252, 249, 241);
+static const uint16_t s_left_detail_text = RGB565(18, 48, 46);
+static const uint16_t s_left_secondary = RGB565(226, 244, 230);
+static const uint16_t s_left_poem_background = RGB565(109, 104, 212);
+static const uint16_t s_left_poem_text = RGB565(255, 238, 186);
 static const uint16_t s_right_background = RGB565(18, 20, 24);
 static const uint16_t s_right_header = RGB565(44, 78, 126);
 static const uint16_t s_right_text = RGB565(245, 247, 250);
@@ -366,6 +401,48 @@ static const font_glyph_t *dashboard_find_glyph(char c)
         }
     }
     return &s_font[0];
+}
+
+static const cjk16_glyph_t *dashboard_find_cjk16_glyph(uint16_t codepoint)
+{
+    for (size_t i = 0; i < sizeof(s_cjk16_font) / sizeof(s_cjk16_font[0]); i++) {
+        if (s_cjk16_font[i].codepoint == codepoint) {
+            return &s_cjk16_font[i];
+        }
+    }
+    return NULL;
+}
+
+static bool dashboard_utf8_next_codepoint(const char **text, uint16_t *codepoint)
+{
+    const unsigned char *ptr;
+
+    if (!text || !*text || !codepoint || **text == '\0') {
+        return false;
+    }
+
+    ptr = (const unsigned char *) *text;
+    if (ptr[0] < 0x80) {
+        *codepoint = ptr[0];
+        *text += 1;
+        return true;
+    }
+    if ((ptr[0] & 0xE0) == 0xC0 && ptr[1] != '\0') {
+        *codepoint = (uint16_t) (((ptr[0] & 0x1F) << 6) | (ptr[1] & 0x3F));
+        *text += 2;
+        return true;
+    }
+    if ((ptr[0] & 0xF0) == 0xE0 && ptr[1] != '\0' && ptr[2] != '\0') {
+        *codepoint = (uint16_t) (((ptr[0] & 0x0F) << 12) |
+                ((ptr[1] & 0x3F) << 6) |
+                (ptr[2] & 0x3F));
+        *text += 3;
+        return true;
+    }
+
+    *codepoint = '?';
+    *text += 1;
+    return true;
 }
 
 static int dashboard_panel_visible_width(const dashboard_panel_t *panel)
@@ -791,6 +868,116 @@ static void dashboard_draw_char(dashboard_panel_t *panel,
     }
 }
 
+static void dashboard_draw_cjk16_char(dashboard_panel_t *panel,
+        int x, int y, uint16_t codepoint, uint16_t color)
+{
+    const cjk16_glyph_t *glyph = dashboard_find_cjk16_glyph(codepoint);
+
+    if (!glyph) {
+        dashboard_draw_char(panel, x + 5, y + 4, '?', color, 1);
+        return;
+    }
+
+    for (int row = 0; row < CJK_GLYPH_HEIGHT; row++) {
+        uint16_t bits = (uint16_t) ((glyph->rows[row * 2] << 8) | glyph->rows[row * 2 + 1]);
+
+        for (int col = 0; col < CJK_GLYPH_WIDTH; col++) {
+            if (bits & (0x8000U >> col)) {
+                dashboard_panel_fill_rect(panel, x + col, y + row, 1, 1, color);
+            }
+        }
+    }
+}
+
+static int dashboard_poem_codepoint_width(uint16_t codepoint)
+{
+    if (codepoint < 0x80) {
+        return FONT_WIDTH + 1;
+    }
+    if (dashboard_find_cjk16_glyph(codepoint)) {
+        return CJK_GLYPH_WIDTH;
+    }
+    return CJK_GLYPH_WIDTH;
+}
+
+static int dashboard_measure_poem_text(const char *text)
+{
+    int width = 0;
+    const char *cursor = text;
+
+    while (cursor && *cursor) {
+        uint16_t codepoint;
+
+        if (!dashboard_utf8_next_codepoint(&cursor, &codepoint)) {
+            break;
+        }
+        width += dashboard_poem_codepoint_width(codepoint);
+    }
+    return width;
+}
+
+static bool dashboard_poem_text_supported(const char *text)
+{
+    const char *cursor = text;
+
+    while (cursor && *cursor) {
+        uint16_t codepoint;
+
+        if (!dashboard_utf8_next_codepoint(&cursor, &codepoint)) {
+            break;
+        }
+        if (codepoint < 0x80) {
+            continue;
+        }
+        if (!dashboard_find_cjk16_glyph(codepoint)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void dashboard_draw_poem_line(dashboard_panel_t *panel,
+        int y, const char *text, uint16_t color, uint16_t background)
+{
+    int panel_width = dashboard_panel_visible_width(panel);
+    int panel_height = dashboard_panel_visible_height(panel);
+    int strip_height = CJK_GLYPH_HEIGHT + 4;
+    int cursor_x = 6;
+    int baseline_y = y;
+    const char *cursor = text;
+
+    if (baseline_y + strip_height > panel_height) {
+        strip_height = panel_height - baseline_y;
+    }
+    if (strip_height < 1) {
+        strip_height = 1;
+    }
+
+    dashboard_panel_fill_rect(panel, 0, baseline_y - 2, panel_width, strip_height, background);
+
+    while (cursor && *cursor) {
+        uint16_t codepoint;
+        int glyph_width;
+
+        if (!dashboard_utf8_next_codepoint(&cursor, &codepoint)) {
+            break;
+        }
+
+        glyph_width = dashboard_poem_codepoint_width(codepoint);
+        if (cursor_x + glyph_width > panel_width - 4) {
+            break;
+        }
+
+        if (codepoint < 0x80) {
+            dashboard_draw_char(panel, cursor_x, baseline_y + 4,
+                    (char) codepoint, color, 1);
+        } else {
+            dashboard_draw_cjk16_char(panel, cursor_x, baseline_y, codepoint, color);
+        }
+        cursor_x += glyph_width;
+    }
+}
+
 static void dashboard_draw_text_line(dashboard_panel_t *panel,
         int y, const char *text,
         uint16_t color, uint16_t background,
@@ -1085,6 +1272,106 @@ static void dashboard_build_location_label(char *out, size_t out_size)
     out[pos] = '\0';
 }
 
+static int dashboard_ascii_strcasecmp(const char *left, const char *right)
+{
+    while (*left && *right) {
+        char a = *left++;
+        char b = *right++;
+
+        if (a >= 'a' && a <= 'z') {
+            a = (char) (a - ('a' - 'A'));
+        }
+        if (b >= 'a' && b <= 'z') {
+            b = (char) (b - ('a' - 'A'));
+        }
+        if (a != b) {
+            return (int) ((unsigned char) a - (unsigned char) b);
+        }
+    }
+    return (int) ((unsigned char) *left - (unsigned char) *right);
+}
+
+static bool dashboard_json_extract_number(const char *json, const char *key,
+        char *out, size_t out_size)
+{
+    const char *cursor;
+    size_t pos = 0;
+    bool saw_digit = false;
+
+    if (!json || !key || !out || out_size == 0) {
+        return false;
+    }
+
+    cursor = strstr(json, key);
+    if (!cursor) {
+        return false;
+    }
+
+    cursor = strchr(cursor, ':');
+    if (!cursor) {
+        return false;
+    }
+    cursor++;
+
+    while (*cursor == ' ' || *cursor == '\t') {
+        cursor++;
+    }
+    if (*cursor == '-' || *cursor == '+') {
+        if (pos + 1 >= out_size) {
+            return false;
+        }
+        out[pos++] = *cursor++;
+    }
+    while ((*cursor >= '0' && *cursor <= '9') || *cursor == '.') {
+        if (pos + 1 >= out_size) {
+            break;
+        }
+        out[pos++] = *cursor++;
+        saw_digit = true;
+    }
+
+    out[pos] = '\0';
+    return saw_digit;
+}
+
+static const char *dashboard_weather_code_text(int code)
+{
+    if (code == 0) {
+        return "CLEAR";
+    }
+    if (code == 1) {
+        return "MOSTLY CLEAR";
+    }
+    if (code == 2) {
+        return "PARTLY CLOUDY";
+    }
+    if (code == 3) {
+        return "CLOUDY";
+    }
+    if (code == 45 || code == 48) {
+        return "FOG";
+    }
+    if (code >= 51 && code <= 57) {
+        return "DRIZZLE";
+    }
+    if (code >= 61 && code <= 67) {
+        return "RAIN";
+    }
+    if (code >= 71 && code <= 77) {
+        return "SNOW";
+    }
+    if (code >= 80 && code <= 82) {
+        return "SHOWERS";
+    }
+    if (code >= 85 && code <= 86) {
+        return "SNOW SHOWERS";
+    }
+    if (code >= 95) {
+        return "THUNDER";
+    }
+    return "WEATHER";
+}
+
 static esp_err_t dashboard_http_get_text(const char *url, int timeout_ms,
         char *out, size_t out_size)
 {
@@ -1126,9 +1413,65 @@ static esp_err_t dashboard_http_get_text(const char *url, int timeout_ms,
     return ESP_OK;
 }
 
+static esp_err_t dashboard_fetch_weather_open_meteo(char *out, size_t out_size)
+{
+    typedef struct {
+        const char *name;
+        const char *latitude;
+        const char *longitude;
+    } weather_city_t;
+
+    static const weather_city_t s_weather_cities[] = {
+        { "shanghai", "31.23", "121.47" },
+        { "beijing", "39.90", "116.40" },
+        { "shenzhen", "22.54", "114.06" },
+        { "guangzhou", "23.13", "113.27" },
+    };
+
+    const weather_city_t *city = &s_weather_cities[0];
+    char url[192];
+    char response[384];
+    char temp_text[16];
+    char code_text[16];
+    int weather_code;
+
+    for (size_t i = 0; i < sizeof(s_weather_cities) / sizeof(s_weather_cities[0]); i++) {
+        if (dashboard_ascii_strcasecmp(CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION,
+                s_weather_cities[i].name) == 0) {
+            city = &s_weather_cities[i];
+            break;
+        }
+    }
+
+    snprintf(url, sizeof(url),
+            "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
+            "&current=temperature_2m,weather_code&timezone=Asia%%2FShanghai",
+            city->latitude, city->longitude);
+
+    if (dashboard_http_get_text(url, 6000, response, sizeof(response)) != ESP_OK) {
+        return ESP_FAIL;
+    }
+    if (!dashboard_json_extract_number(response, "\"temperature_2m\"", temp_text, sizeof(temp_text))) {
+        return ESP_FAIL;
+    }
+    if (!dashboard_json_extract_number(response, "\"weather_code\"", code_text, sizeof(code_text))) {
+        return ESP_FAIL;
+    }
+
+    weather_code = (int) strtol(code_text, NULL, 10);
+    snprintf(out, out_size, "%sC %s", temp_text, dashboard_weather_code_text(weather_code));
+    out[out_size - 1] = '\0';
+    dashboard_compact_spaces(out);
+    return ESP_OK;
+}
+
 static esp_err_t dashboard_fetch_weather(char *out, size_t out_size)
 {
     char url[160];
+
+    if (dashboard_fetch_weather_open_meteo(out, out_size) == ESP_OK) {
+        return ESP_OK;
+    }
 
     if (CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION[0] != '\0') {
         snprintf(url, sizeof(url),
@@ -1177,11 +1520,11 @@ static esp_err_t dashboard_fetch_weather(char *out, size_t out_size)
 static void dashboard_select_fallback_poem(char *out, size_t out_size, size_t index)
 {
     static const char *const s_poem_fallbacks[] = {
-        "CHUN MIAN BU JUE XIAO",
-        "MING YUE SONG JIAN ZHAO",
-        "QING FENG ZHI SHANG LAI",
-        "SHAN QI RI XI JIA",
-        "YE BAN ZHONG SHENG DAO",
+        "春眠不觉晓",
+        "明月松间照",
+        "山气日夕佳",
+        "夜半钟声到",
+        "江清月近人",
     };
 
     if (!out || out_size == 0) {
@@ -1197,23 +1540,25 @@ static void dashboard_select_fallback_poem(char *out, size_t out_size, size_t in
 static void dashboard_prepare_poem_text(char *out, size_t out_size,
         const char *raw_text, size_t fallback_index)
 {
-    size_t char_limit = dashboard_left_line_char_limit(LEFT_BODY_SCALE);
+    int available_width = dashboard_panel_visible_width(&s_left_panel) - 12;
+    size_t pos = 0;
+    const char *cursor = raw_text;
 
     if (!out || out_size == 0) {
         return;
     }
 
-    if (raw_text) {
-        strncpy(out, raw_text, out_size);
-        out[out_size - 1] = '\0';
-        dashboard_sanitize_ascii(out);
-        dashboard_compact_spaces(out);
-        dashboard_fit_text_for_line(out, char_limit);
-    } else {
-        out[0] = '\0';
+    out[0] = '\0';
+    if (cursor) {
+        while (*cursor && *cursor != '\r' && *cursor != '\n' && pos + 1 < out_size) {
+            out[pos++] = *cursor++;
+        }
+        out[pos] = '\0';
     }
 
-    if (out[0] == '\0') {
+    if (out[0] == '\0' ||
+            !dashboard_poem_text_supported(out) ||
+            dashboard_measure_poem_text(out) > available_width) {
         dashboard_select_fallback_poem(out, out_size, fallback_index);
     }
 }
@@ -1246,20 +1591,20 @@ static int dashboard_left_time_y(void)
 
 static int dashboard_left_detail_y(void)
 {
-    return dashboard_left_header_height() + 7;
+    return dashboard_left_header_height() + 5;
 }
 
 static int dashboard_left_poem_band_y(void)
 {
     int panel_height = dashboard_panel_visible_height(&s_left_panel);
-    int band_height = FONT_HEIGHT * LEFT_BODY_SCALE + 12;
+    int band_height = CJK_GLYPH_HEIGHT + 6;
 
     return panel_height - band_height;
 }
 
 static int dashboard_left_poem_y(void)
 {
-    return dashboard_left_poem_band_y() + 4;
+    return dashboard_left_poem_band_y() + 3;
 }
 
 static void dashboard_format_left_detail(char *out, size_t out_size,
@@ -1321,7 +1666,7 @@ static void dashboard_redraw_left_detail(const char *weather_text, bool wifi_con
 
     dashboard_format_left_detail(detail_text, sizeof(detail_text), weather_text, wifi_connected);
     dashboard_draw_text_line(&s_left_panel, dashboard_left_detail_y(), detail_text,
-            wifi_connected ? s_left_text : s_left_secondary,
+            wifi_connected ? s_left_detail_text : s_left_secondary,
             s_left_background, LEFT_BODY_SCALE, false);
 }
 
@@ -1330,8 +1675,8 @@ static void dashboard_redraw_left_poem(const char *poem_text)
     char visible_text[LEFT_POEM_TEXT_LEN];
 
     dashboard_prepare_poem_text(visible_text, sizeof(visible_text), poem_text, 0);
-    dashboard_draw_text_line(&s_left_panel, dashboard_left_poem_y(), visible_text,
-            s_left_poem_text, s_left_poem_background, LEFT_BODY_SCALE, false);
+    dashboard_draw_poem_line(&s_left_panel, dashboard_left_poem_y(), visible_text,
+            s_left_poem_text, s_left_poem_background);
 }
 
 static void dashboard_redraw_left(const char *time_text, const char *weather_text,
