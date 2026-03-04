@@ -99,7 +99,9 @@ static const homekit_device_t s_light_device = {
     .cid = HAP_CID_LIGHTING,
     .identify = light_identify,
     .add_services = light_add_services,
+    .uses_custom_display = false,
     .init_hardware = light_init_hardware,
+    .start_runtime_services = NULL,
 };
 
 const homekit_device_t *light_device_get(void)

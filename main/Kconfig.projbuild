@@ -23,4 +23,314 @@ menu "Example Configuration"
         help
             Setup id to be used for HomeKot pairing, if hard-coded setup code is enabled.
 
+    menu "ST7789 Display Configuration"
+
+        config HOMEKIT_ENABLE_ST7789_DISPLAY
+            bool "Enable ST7789 SPI display"
+            default n
+            help
+                Enable an optional ST7789 status screen. The display shows the
+                accessory name, model, setup code, and live on/off state.
+
+        if HOMEKIT_ENABLE_ST7789_DISPLAY
+
+            config HOMEKIT_ST7789_PIN_SCLK
+                int "SPI clock GPIO"
+                default -1
+                help
+                    GPIO connected to the ST7789 SCL/SCLK pin.
+
+            config HOMEKIT_ST7789_PIN_MOSI
+                int "SPI MOSI GPIO"
+                default -1
+                help
+                    GPIO connected to the ST7789 SDA/MOSI pin.
+
+            config HOMEKIT_ST7789_PIN_CS
+                int "SPI CS GPIO"
+                default -1
+                help
+                    GPIO connected to the ST7789 CS pin.
+
+            config HOMEKIT_ST7789_PIN_DC
+                int "SPI DC GPIO"
+                default -1
+                help
+                    GPIO connected to the ST7789 DC pin.
+
+            config HOMEKIT_ST7789_PIN_RST
+                int "Reset GPIO"
+                default -1
+                help
+                    GPIO connected to the ST7789 RST pin. Set to -1 if the
+                    module reset pin is tied high.
+
+            config HOMEKIT_ST7789_PIN_BL
+                int "Backlight GPIO"
+                default -1
+                help
+                    GPIO connected to the display backlight control pin. Set to
+                    -1 if the backlight is always on.
+
+            config HOMEKIT_ST7789_BL_ACTIVE_HIGH
+                bool "Backlight active high"
+                default y
+                help
+                    Enable this when the backlight turns on with a high level.
+
+            config HOMEKIT_ST7789_SPI_CLOCK_HZ
+                int "SPI clock (Hz)"
+                default 20000000
+                help
+                    Pixel clock used for the SPI panel I/O.
+
+            config HOMEKIT_ST7789_H_RES
+                int "Horizontal resolution"
+                default 240
+                help
+                    Active display width in pixels.
+
+            config HOMEKIT_ST7789_V_RES
+                int "Vertical resolution"
+                default 240
+                help
+                    Active display height in pixels.
+
+            config HOMEKIT_ST7789_X_OFFSET
+                int "X offset"
+                default 0
+                help
+                    Horizontal panel gap, useful for modules where the visible
+                    area is offset inside the controller frame buffer.
+
+            config HOMEKIT_ST7789_Y_OFFSET
+                int "Y offset"
+                default 0
+                help
+                    Vertical panel gap, useful for modules where the visible
+                    area is offset inside the controller frame buffer.
+
+            config HOMEKIT_ST7789_SWAP_XY
+                bool "Swap X/Y"
+                default n
+                help
+                    Rotate the content by swapping the X and Y axes.
+
+            config HOMEKIT_ST7789_MIRROR_X
+                bool "Mirror X"
+                default n
+                help
+                    Mirror the display content horizontally.
+
+            config HOMEKIT_ST7789_MIRROR_Y
+                bool "Mirror Y"
+                default n
+                help
+                    Mirror the display content vertically.
+
+            config HOMEKIT_ST7789_INVERT_COLORS
+                bool "Invert colors"
+                default y
+                help
+                    Some ST7789 modules require color inversion for correct
+                    contrast. Disable this if colors look wrong.
+
+            config HOMEKIT_ST7789_BGR_ORDER
+                bool "Use BGR color order"
+                default y
+                help
+                    Switch between RGB and BGR ordering. Disable this if red and
+                    blue are swapped on your panel.
+
+        endif
+
+    endmenu
+
+    menu "Dashboard Device Configuration"
+
+        config HOMEKIT_DASHBOARD_LIGHT_ACTIVE_LOW
+            bool "Dashboard light outputs are active low"
+            default y
+            help
+                Keep this enabled when your relays or drivers turn on with a
+                low output level.
+
+        config HOMEKIT_DASHBOARD_LIGHT1_GPIO
+            int "Dashboard light 1 GPIO"
+            default 2
+            help
+                Output GPIO for the first HomeKit light.
+
+        config HOMEKIT_DASHBOARD_LIGHT2_GPIO
+            int "Dashboard light 2 GPIO"
+            default 3
+            help
+                Output GPIO for the second HomeKit light.
+
+        config HOMEKIT_DASHBOARD_LIGHT3_GPIO
+            int "Dashboard light 3 GPIO"
+            default 4
+            help
+                Output GPIO for the third HomeKit light.
+
+        config HOMEKIT_DASHBOARD_SPI_SCLK
+            int "Dashboard shared SPI clock GPIO"
+            default 6
+            help
+                Shared SPI SCLK for both strip displays.
+
+        config HOMEKIT_DASHBOARD_SPI_MOSI
+            int "Dashboard shared SPI MOSI GPIO"
+            default 7
+            help
+                Shared SPI MOSI/SDA for both strip displays.
+
+        config HOMEKIT_DASHBOARD_SPI_CLOCK_HZ
+            int "Dashboard SPI clock (Hz)"
+            default 20000000
+            help
+                Shared SPI pixel clock used by both panels.
+
+        menu "Left ST7789 Strip"
+
+            config HOMEKIT_DASHBOARD_LEFT_CS
+                int "Left ST7789 CS GPIO"
+                default 10
+
+            config HOMEKIT_DASHBOARD_LEFT_DC
+                int "Left ST7789 DC GPIO"
+                default 11
+
+            config HOMEKIT_DASHBOARD_LEFT_RST
+                int "Left ST7789 reset GPIO"
+                default 12
+
+            config HOMEKIT_DASHBOARD_LEFT_BL
+                int "Left ST7789 backlight GPIO"
+                default -1
+
+            config HOMEKIT_DASHBOARD_LEFT_BL_ACTIVE_HIGH
+                bool "Left ST7789 backlight active high"
+                default y
+
+            config HOMEKIT_DASHBOARD_LEFT_H_RES
+                int "Left ST7789 width"
+                default 76
+
+            config HOMEKIT_DASHBOARD_LEFT_V_RES
+                int "Left ST7789 height"
+                default 284
+
+            config HOMEKIT_DASHBOARD_LEFT_X_OFFSET
+                int "Left ST7789 X offset"
+                default 0
+
+            config HOMEKIT_DASHBOARD_LEFT_Y_OFFSET
+                int "Left ST7789 Y offset"
+                default 0
+
+            config HOMEKIT_DASHBOARD_LEFT_SWAP_XY
+                bool "Left ST7789 swap X/Y"
+                default n
+
+            config HOMEKIT_DASHBOARD_LEFT_MIRROR_X
+                bool "Left ST7789 mirror X"
+                default n
+
+            config HOMEKIT_DASHBOARD_LEFT_MIRROR_Y
+                bool "Left ST7789 mirror Y"
+                default n
+
+            config HOMEKIT_DASHBOARD_LEFT_INVERT_COLORS
+                bool "Left ST7789 invert colors"
+                default y
+
+            config HOMEKIT_DASHBOARD_LEFT_BGR_ORDER
+                bool "Left ST7789 use BGR order"
+                default y
+
+        endmenu
+
+        menu "Right NV3007 Strip"
+
+            config HOMEKIT_DASHBOARD_RIGHT_CS
+                int "Right NV3007 CS GPIO"
+                default 13
+
+            config HOMEKIT_DASHBOARD_RIGHT_DC
+                int "Right NV3007 DC GPIO"
+                default 14
+
+            config HOMEKIT_DASHBOARD_RIGHT_RST
+                int "Right NV3007 reset GPIO"
+                default 15
+
+            config HOMEKIT_DASHBOARD_RIGHT_BL
+                int "Right NV3007 backlight GPIO"
+                default -1
+
+            config HOMEKIT_DASHBOARD_RIGHT_BL_ACTIVE_HIGH
+                bool "Right NV3007 backlight active high"
+                default y
+
+            config HOMEKIT_DASHBOARD_RIGHT_H_RES
+                int "Right NV3007 width"
+                default 142
+
+            config HOMEKIT_DASHBOARD_RIGHT_V_RES
+                int "Right NV3007 height"
+                default 428
+
+            config HOMEKIT_DASHBOARD_RIGHT_X_OFFSET
+                int "Right NV3007 X offset"
+                default 0
+
+            config HOMEKIT_DASHBOARD_RIGHT_Y_OFFSET
+                int "Right NV3007 Y offset"
+                default 0
+
+            config HOMEKIT_DASHBOARD_RIGHT_SWAP_XY
+                bool "Right NV3007 swap X/Y"
+                default n
+
+            config HOMEKIT_DASHBOARD_RIGHT_MIRROR_X
+                bool "Right NV3007 mirror X"
+                default n
+
+            config HOMEKIT_DASHBOARD_RIGHT_MIRROR_Y
+                bool "Right NV3007 mirror Y"
+                default n
+
+            config HOMEKIT_DASHBOARD_RIGHT_INVERT_COLORS
+                bool "Right NV3007 invert colors"
+                default n
+
+            config HOMEKIT_DASHBOARD_RIGHT_BGR_ORDER
+                bool "Right NV3007 use BGR order"
+                default y
+
+        endmenu
+
+        config HOMEKIT_DASHBOARD_TIMEZONE
+            string "Dashboard timezone (TZ)"
+            default "CST-8"
+            help
+                POSIX TZ string used for the left screen clock.
+
+        config HOMEKIT_DASHBOARD_WEATHER_LOCATION
+            string "Weather location slug"
+            default ""
+            help
+                Optional wttr.in location, for example shanghai or beijing.
+                Leave empty to let wttr.in infer location from the public IP.
+
+        config HOMEKIT_DASHBOARD_WEATHER_REFRESH_SEC
+            int "Weather refresh interval (seconds)"
+            default 600
+            range 60 86400
+            help
+                How often to refresh the weather string on the left screen.
+
+    endmenu
+
 endmenu

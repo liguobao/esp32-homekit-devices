@@ -89,7 +89,9 @@ static const homekit_device_t s_outlet_device = {
     .cid = HAP_CID_OUTLET,
     .identify = outlet_identify,
     .add_services = outlet_add_services,
+    .uses_custom_display = false,
     .init_hardware = outlet_init_hardware,
+    .start_runtime_services = NULL,
 };
 
 const homekit_device_t *outlet_device_get(void)

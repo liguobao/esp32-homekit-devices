@@ -1,5 +1,7 @@
 #include "gpio_output.h"
 
+#include "display_support.h"
+
 #include "driver/gpio.h"
 #include "esp_log.h"
 
@@ -15,6 +17,7 @@ static void gpio_output_apply_state(void)
     ESP_ERROR_CHECK(gpio_set_level(s_output_gpio, level));
     ESP_LOGI(TAG, "Output state: %s (GPIO%d=%d)",
             s_is_on ? "on" : "off", s_output_gpio, level);
+    display_support_show_power(s_is_on);
 }
 
 void gpio_output_init(void)

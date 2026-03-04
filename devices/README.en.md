@@ -11,7 +11,7 @@ This directory contains different HomeKit device implementations and their share
 - `device.c`
   Dispatcher for the active device type
 - `<type>/`
-  One directory per device type, such as `outlet/` and `light/`
+  One directory per device type, such as `outlet/`, `light/`, and `dashboard/`
 
 ## How to Add a New Device
 
@@ -26,11 +26,12 @@ This directory contains different HomeKit device implementations and their share
 
 ## Current Selection Model
 
-The project currently ships with `outlet` and `light`, selected by `HOMEKIT_DEVICE_TYPE` at build time.
+The project currently ships with `outlet`, `light`, and `dashboard`, selected by `HOMEKIT_DEVICE_TYPE` at build time.
 
 Example:
 
 ```sh
 HOMEKIT_DEVICE_TYPE=outlet idf.py reconfigure build
 HOMEKIT_DEVICE_TYPE=light idf.py reconfigure build
+HOMEKIT_DEVICE_TYPE=dashboard idf.py reconfigure build
 ```

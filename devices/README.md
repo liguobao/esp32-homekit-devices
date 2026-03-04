@@ -12,7 +12,7 @@
 - `device.c`
   当前激活设备的分发逻辑
 - `<type>/`
-  每种设备一个目录，例如 `outlet/`、`light/`
+  每种设备一个目录，例如 `outlet/`、`light/`、`dashboard/`
 
 ## 如何新增一个设备
 
@@ -27,10 +27,11 @@
 
 ## 当前切换方式
 
-当前工程只内置了 `outlet` 和 `light` 两种设备类型，构建时通过 `HOMEKIT_DEVICE_TYPE` 切换。
+当前工程内置了 `outlet`、`light` 和 `dashboard` 三种设备类型，构建时通过 `HOMEKIT_DEVICE_TYPE` 切换。
 示例：
 
 ```sh
 HOMEKIT_DEVICE_TYPE=outlet idf.py reconfigure build
 HOMEKIT_DEVICE_TYPE=light idf.py reconfigure build
+HOMEKIT_DEVICE_TYPE=dashboard idf.py reconfigure build
 ```

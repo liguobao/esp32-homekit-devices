@@ -1,6 +1,8 @@
 #ifndef HOMEKIT_DEVICE_H_
 #define HOMEKIT_DEVICE_H_
 
+#include <stdbool.h>
+
 #include <hap.h>
 
 typedef struct {
@@ -13,7 +15,9 @@ typedef struct {
     hap_cid_t cid;
     hap_identify_routine_t identify;
     int (*add_services)(hap_acc_t *accessory);
+    bool uses_custom_display;
     void (*init_hardware)(void);
+    void (*start_runtime_services)(void);
 } homekit_device_t;
 
 const homekit_device_t *device_get_active(void);

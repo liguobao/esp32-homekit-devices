@@ -1,7 +1,7 @@
 # ESP32 HomeKit
 
 This is an `ESP32-C3` HomeKit demo project based on Espressif `esp-homekit-sdk`.
-The repository currently ships with two device variants: `outlet` and `light`.
+The repository currently ships with three device variants: `outlet`, `light`, and `dashboard`.
 
 ## Prerequisites
 
@@ -34,6 +34,14 @@ Switch to `light`:
 ```sh
 ./scripts/build-device.sh light
 ./scripts/flash-device.sh light -p /dev/cu.usbmodemXXXX
+./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
+```
+
+Switch to `dashboard`:
+
+```sh
+./scripts/build-device.sh dashboard
+./scripts/flash-device.sh dashboard -p /dev/cu.usbmodemXXXX
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
 
@@ -71,6 +79,52 @@ Remove-Item .\sdkconfig, .\sdkconfig.old -Force -ErrorAction SilentlyContinue
 cmd /c """$idfPath\export.bat"" && idf.py -DHOMEKIT_DEVICE_TYPE=outlet reconfigure build"
 ```
 
+## ST7789 Display
+
+This version now includes optional `ST7789` SPI display support. It is disabled
+by default and does not change the existing `outlet/light` behavior unless you
+turn it on.
+
+When enabled, the screen shows the accessory name, model, setup code, and the
+current relay on/off state.
+
+Configure it with:
+
+```sh
+idf.py menuconfig
+```
+
+Then open `Example Configuration -> ST7789 Display Configuration` and set at
+least these GPIOs:
+
+- `SPI clock GPIO`
+- `SPI MOSI GPIO`
+- `SPI CS GPIO`
+- `SPI DC GPIO`
+
+Useful optional settings:
+
+- `Reset GPIO` and `Backlight GPIO`
+- Resolution (default `240x240`)
+- `X/Y offset`
+- `Swap X/Y`, `Mirror X/Y`
+- `Invert colors`
+- `Use BGR color order`
+
+Recommended wiring (classic `ESP32`, using the `ST7789` strip by itself):
+
+- `GPIO18` -> `SCL/CLK/SCK`
+- `GPIO23` -> `SDA/MOSI/DIN`
+- `GPIO16` -> `CS`
+- `GPIO17` -> `DC/RS/A0`
+- `GPIO21` -> `RST/RES`
+- `GPIO22` -> `BL/LED` (or wire it directly to `3V3` and set `Backlight GPIO` to `-1`)
+- `3V3` -> `VCC`
+- `GND` -> `GND`
+
+Set the panel resolution to `76x284`, then fine-tune `X/Y offset`, `Swap X/Y`, and
+`Mirror X/Y` to match your module orientation.
+
 ## Manual Build, Flash, and Monitor
 
 Run this once for the first build, or after changing the target chip:
@@ -95,6 +149,14 @@ Build `light` manually:
 export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
 . "$IDF_PATH/export.sh"
 HOMEKIT_DEVICE_TYPE=light idf.py reconfigure build
+```
+
+Build `dashboard` manually:
+
+```sh
+export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
+. "$IDF_PATH/export.sh"
+HOMEKIT_DEVICE_TYPE=dashboard idf.py reconfigure build
 ```
 
 Flash and monitor manually:

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <outlet|light> [idf.py args...]" >&2
+    echo "Usage: $0 <outlet|light|dashboard> [idf.py args...]" >&2
     exit 1
 fi
 
@@ -11,7 +11,7 @@ DEVICE_TYPE="$1"
 shift
 
 case "$DEVICE_TYPE" in
-    outlet|light)
+    outlet|light|dashboard)
         ;;
     *)
         echo "Unsupported device type: $DEVICE_TYPE" >&2

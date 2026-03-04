@@ -10,12 +10,13 @@ endif()
 string(TOLOWER "${HOMEKIT_DEVICE_TYPE}" HOMEKIT_DEVICE_TYPE)
 set(HOMEKIT_DEVICE_TYPE "${HOMEKIT_DEVICE_TYPE}" CACHE STRING
     "Selected HomeKit device type" FORCE)
-set_property(CACHE HOMEKIT_DEVICE_TYPE PROPERTY STRINGS outlet light)
+set_property(CACHE HOMEKIT_DEVICE_TYPE PROPERTY STRINGS outlet light dashboard)
 if(NOT HOMEKIT_DEVICE_TYPE STREQUAL "outlet" AND
-        NOT HOMEKIT_DEVICE_TYPE STREQUAL "light")
+        NOT HOMEKIT_DEVICE_TYPE STREQUAL "light" AND
+        NOT HOMEKIT_DEVICE_TYPE STREQUAL "dashboard")
     message(FATAL_ERROR
         "Unsupported HOMEKIT_DEVICE_TYPE='${HOMEKIT_DEVICE_TYPE}'. "
-        "Use 'outlet' or 'light'.")
+        "Use 'outlet', 'light', or 'dashboard'.")
 endif()
 message(STATUS "HomeKit device type: ${HOMEKIT_DEVICE_TYPE}")
 set(SDKCONFIG_DEFAULTS

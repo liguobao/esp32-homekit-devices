@@ -1,7 +1,7 @@
 # ESP32 HomeKit
 
 这是一个基于 Espressif `esp-homekit-sdk` 的 `ESP32-C3` HomeKit 示例工程。
-当前仓库内置 `outlet` 和 `light` 两种设备类型。
+当前仓库内置 `outlet`、`light` 和 `dashboard` 三种设备类型。
 
 英文版文档见 [README.en.md](README.en.md)。
 
@@ -35,6 +35,14 @@ cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 ```sh
 ./scripts/build-device.sh light
 ./scripts/flash-device.sh light -p /dev/cu.usbmodemXXXX
+./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
+```
+
+切到 `dashboard`：
+
+```sh
+./scripts/build-device.sh dashboard
+./scripts/flash-device.sh dashboard -p /dev/cu.usbmodemXXXX
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
 
@@ -72,6 +80,46 @@ Remove-Item .\sdkconfig, .\sdkconfig.old -Force -ErrorAction SilentlyContinue
 cmd /c """$idfPath\export.bat"" && idf.py -DHOMEKIT_DEVICE_TYPE=outlet reconfigure build"
 ```
 
+## ST7789 显示屏
+
+这个版本增加了可选的 `ST7789` SPI 显示支持，默认关闭，不影响现有 `outlet/light` 行为。
+启用后会在屏幕上显示配件名、型号、配对码，以及当前继电器的开关状态。
+
+配置方式：
+
+```sh
+idf.py menuconfig
+```
+
+进入 `Example Configuration -> ST7789 Display Configuration`，至少设置这些 GPIO：
+
+- `SPI clock GPIO`
+- `SPI MOSI GPIO`
+- `SPI CS GPIO`
+- `SPI DC GPIO`
+
+常见可选项：
+
+- `Reset GPIO` 和 `Backlight GPIO`
+- 分辨率（默认 `240x240`）
+- `X/Y offset`
+- `Swap X/Y`、`Mirror X/Y`
+- `Invert colors`
+- `Use BGR color order`
+
+推荐接线（经典 `ESP32`，单独使用这块 `ST7789` 长条屏）：
+
+- `GPIO18` -> `SCL/CLK/SCK`
+- `GPIO23` -> `SDA/MOSI/DIN`
+- `GPIO16` -> `CS`
+- `GPIO17` -> `DC/RS/A0`
+- `GPIO21` -> `RST/RES`
+- `GPIO22` -> `BL/LED`（如果背光常亮，也可以直接接 `3V3`，并把 `Backlight GPIO` 设为 `-1`）
+- `3V3` -> `VCC`
+- `GND` -> `GND`
+
+建议把分辨率设置为 `76x284`，再根据模组方向微调 `X/Y offset`、`Swap X/Y` 和 `Mirror X/Y`。
+
 ## 纯手动命令
 
 第一次构建或切换过目标芯片时：
@@ -96,6 +144,14 @@ HOMEKIT_DEVICE_TYPE=outlet idf.py reconfigure build
 export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
 . "$IDF_PATH/export.sh"
 HOMEKIT_DEVICE_TYPE=light idf.py reconfigure build
+```
+
+手动构建 `dashboard`：
+
+```sh
+export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
+. "$IDF_PATH/export.sh"
+HOMEKIT_DEVICE_TYPE=dashboard idf.py reconfigure build
 ```
 
 手动烧录与监控：

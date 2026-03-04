@@ -40,6 +40,7 @@
 #include <app_hap_setup_payload.h>
 
 #include "device.h"
+#include "display_support.h"
 
 /* Comment out the below line to disable Firmware Upgrades */
 #define CONFIG_FIRMWARE_SERVICE
@@ -108,6 +109,11 @@ static void device_thread_entry(void *arg)
     hap_acc_t *accessory = NULL;
     static char accessory_name[32];
     static char serial_num[20];
+#ifdef CONFIG_EXAMPLE_SETUP_CODE
+    const char *setup_code = CONFIG_EXAMPLE_SETUP_CODE;
+#else
+    const char *setup_code = "PAIR IN APP";
+#endif
 
     if (!device) {
         ESP_LOGE(TAG, "No device profile selected");
@@ -176,6 +182,12 @@ static void device_thread_entry(void *arg)
     /* Add the Accessory to the HomeKit Database */
     hap_add_accessory(accessory);
 
+    /* Initialize the optional shared status display before hardware-specific I/O. */
+    if (!device->uses_custom_display) {
+        display_support_init();
+        display_support_show_boot(accessory_name, device->model, setup_code);
+    }
+
     /* Initialize the selected device hardware. */
     device->init_hardware();
 
@@ -207,13 +219,16 @@ static void device_thread_entry(void *arg)
     app_hap_setup_payload(CONFIG_EXAMPLE_SETUP_CODE, CONFIG_EXAMPLE_SETUP_ID, false, cfg.cid);
 #endif
 #endif
-    ESP_LOGI(TAG, "HomeKit setup code: %s", CONFIG_EXAMPLE_SETUP_CODE);
+    ESP_LOGI(TAG, "HomeKit setup code: %s", setup_code);
 
     /* Enable Hardware MFi authentication (applicable only for MFi variant of SDK) */
     hap_enable_mfi_auth(HAP_MFI_AUTH_HW);
 
     /* Initialize Wi-Fi */
     app_wifi_init();
+    if (device->start_runtime_services) {
+        device->start_runtime_services();
+    }
 
     /* After all the initializations are done, start the HAP core */
     hap_start();

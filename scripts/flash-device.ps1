@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("outlet", "light")]
+    [ValidateSet("outlet", "light", "dashboard")]
     [string]$DeviceType,
 
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
