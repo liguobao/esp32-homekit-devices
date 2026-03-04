@@ -174,6 +174,8 @@ typedef struct {
     bool light_states[3];
     TickType_t last_weather_fetch_tick;
     TickType_t last_poem_fetch_tick;
+    TickType_t fallback_time_tick;
+    time_t fallback_time_seed;
     SemaphoreHandle_t lock;
 } dashboard_state_t;
 
@@ -1071,16 +1073,81 @@ static void dashboard_refresh_text_cells(dashboard_panel_t *panel,
     }
 }
 
+static int dashboard_build_month_to_int(const char *month)
+{
+    static const char *const s_months[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    };
+
+    for (int i = 0; i < 12; i++) {
+        if (strncmp(month, s_months[i], 3) == 0) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+static time_t dashboard_build_time_seed(void)
+{
+    struct tm build_tm = {0};
+    char month[4];
+    int day;
+    int year;
+    int hour;
+    int minute;
+    int second;
+
+    if (sscanf(__DATE__, "%3s %d %d", month, &day, &year) != 3) {
+        return 0;
+    }
+    if (sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second) != 3) {
+        return 0;
+    }
+
+    build_tm.tm_year = year - 1900;
+    build_tm.tm_mon = dashboard_build_month_to_int(month);
+    build_tm.tm_mday = day;
+    build_tm.tm_hour = hour;
+    build_tm.tm_min = minute;
+    build_tm.tm_sec = second;
+    build_tm.tm_isdst = -1;
+    return mktime(&build_tm);
+}
+
 static void dashboard_update_time_cache(void)
 {
     time_t now;
+    time_t display_now;
     struct tm time_info;
+    bool real_time_valid;
+    bool time_was_synced;
+    char time_text[LEFT_TIME_TEXT_LEN];
 
     time(&now);
     localtime_r(&now, &time_info);
+    real_time_valid = time_info.tm_year >= (2024 - 1900);
+    time_was_synced = s_state.time_synced;
 
-    if (time_info.tm_year >= (2024 - 1900)) {
-        char time_text[LEFT_TIME_TEXT_LEN];
+    if (real_time_valid) {
+        s_state.time_synced = true;
+        display_now = now;
+    } else if (s_state.fallback_time_seed > 0) {
+        TickType_t elapsed_ticks = xTaskGetTickCount() - s_state.fallback_time_tick;
+
+        s_state.time_synced = false;
+        display_now = s_state.fallback_time_seed + (time_t) (elapsed_ticks / configTICK_RATE_HZ);
+        localtime_r(&display_now, &time_info);
+    } else {
+        s_state.time_synced = false;
+        if (strcmp(s_state.last_time_text, "----.--.-- --:--:--") != 0) {
+            strcpy(s_state.last_time_text, "----.--.-- --:--:--");
+            s_state.left_time_dirty = true;
+        }
+        return;
+    }
+
+    {
         int year = time_info.tm_year + 1900;
         int month = time_info.tm_mon + 1;
         int day = time_info.tm_mday;
@@ -1107,17 +1174,17 @@ static void dashboard_update_time_cache(void)
             second = 0;
         }
 
-        s_state.time_synced = true;
         snprintf(time_text, sizeof(time_text), "%04d-%02d-%02d %02d:%02d:%02d",
                 year, month, day, hour, minute, second);
-        if (strcmp(time_text, s_state.last_time_text) != 0) {
-            strcpy(s_state.last_time_text, time_text);
-            s_state.left_time_dirty = true;
-        }
-    } else if (strcmp(s_state.last_time_text, "----.--.-- --:--:--") != 0) {
-        s_state.time_synced = false;
-        strcpy(s_state.last_time_text, "----.--.-- --:--:--");
+    }
+    if (strcmp(time_text, s_state.last_time_text) != 0) {
+        strcpy(s_state.last_time_text, time_text);
         s_state.left_time_dirty = true;
+    }
+    if (!time_was_synced && s_state.time_synced) {
+        s_state.last_weather_fetch_tick = 0;
+        s_state.last_poem_fetch_tick = 0;
+        s_state.left_dirty = true;
     }
 }
 
@@ -1334,6 +1401,14 @@ static bool dashboard_json_extract_number(const char *json, const char *key,
     return saw_digit;
 }
 
+static bool dashboard_codepoint_renderable(uint16_t codepoint)
+{
+    if (codepoint < 0x80) {
+        return codepoint >= 32 && codepoint <= 126;
+    }
+    return dashboard_find_cjk16_glyph(codepoint) != NULL;
+}
+
 static const char *dashboard_weather_code_text(int code)
 {
     if (code == 0) {
@@ -1370,6 +1445,79 @@ static const char *dashboard_weather_code_text(int code)
         return "THUNDER";
     }
     return "WEATHER";
+}
+
+static void dashboard_extract_supported_poem_fragment(char *out, size_t out_size,
+        const char *raw_text, int available_width)
+{
+    char best_text[LEFT_POEM_TEXT_LEN];
+    char current_text[LEFT_POEM_TEXT_LEN];
+    size_t best_len = 0;
+    size_t current_len = 0;
+    int current_width = 0;
+    const char *cursor = raw_text;
+
+    if (!out || out_size == 0) {
+        return;
+    }
+
+    best_text[0] = '\0';
+    current_text[0] = '\0';
+
+    while (cursor && *cursor && *cursor != '\r' && *cursor != '\n') {
+        const char *char_start = cursor;
+        uint16_t codepoint;
+        size_t utf8_len;
+        int glyph_width;
+
+        if (!dashboard_utf8_next_codepoint(&cursor, &codepoint)) {
+            break;
+        }
+        utf8_len = (size_t) (cursor - char_start);
+
+        if (!dashboard_codepoint_renderable(codepoint)) {
+            if (current_len > best_len) {
+                memcpy(best_text, current_text, current_len + 1);
+                best_len = current_len;
+            }
+            current_len = 0;
+            current_width = 0;
+            current_text[0] = '\0';
+            continue;
+        }
+
+        glyph_width = dashboard_poem_codepoint_width(codepoint);
+        if (current_width + glyph_width > available_width ||
+                current_len + utf8_len >= sizeof(current_text)) {
+            if (current_len > best_len) {
+                memcpy(best_text, current_text, current_len + 1);
+                best_len = current_len;
+            }
+            current_len = 0;
+            current_width = 0;
+            current_text[0] = '\0';
+            if (glyph_width > available_width || utf8_len >= sizeof(current_text)) {
+                continue;
+            }
+        }
+
+        memcpy(&current_text[current_len], char_start, utf8_len);
+        current_len += utf8_len;
+        current_text[current_len] = '\0';
+        current_width += glyph_width;
+    }
+
+    if (current_len > best_len) {
+        memcpy(best_text, current_text, current_len + 1);
+        best_len = current_len;
+    }
+
+    if (best_len > 0) {
+        strncpy(out, best_text, out_size);
+        out[out_size - 1] = '\0';
+    } else {
+        out[0] = '\0';
+    }
 }
 
 static esp_err_t dashboard_http_get_text(const char *url, int timeout_ms,
@@ -1429,6 +1577,7 @@ static esp_err_t dashboard_fetch_weather_open_meteo(char *out, size_t out_size)
     };
 
     const weather_city_t *city = &s_weather_cities[0];
+    const char *current_section;
     char url[192];
     char response[384];
     char temp_text[16];
@@ -1451,10 +1600,16 @@ static esp_err_t dashboard_fetch_weather_open_meteo(char *out, size_t out_size)
     if (dashboard_http_get_text(url, 6000, response, sizeof(response)) != ESP_OK) {
         return ESP_FAIL;
     }
-    if (!dashboard_json_extract_number(response, "\"temperature_2m\"", temp_text, sizeof(temp_text))) {
+    current_section = strstr(response, "\"current\":");
+    if (!current_section) {
         return ESP_FAIL;
     }
-    if (!dashboard_json_extract_number(response, "\"weather_code\"", code_text, sizeof(code_text))) {
+    if (!dashboard_json_extract_number(current_section, "\"temperature_2m\"",
+            temp_text, sizeof(temp_text))) {
+        return ESP_FAIL;
+    }
+    if (!dashboard_json_extract_number(current_section, "\"weather_code\"",
+            code_text, sizeof(code_text))) {
         return ESP_FAIL;
     }
 
@@ -1541,6 +1696,7 @@ static void dashboard_prepare_poem_text(char *out, size_t out_size,
         const char *raw_text, size_t fallback_index)
 {
     int available_width = dashboard_panel_visible_width(&s_left_panel) - 12;
+    char raw_line[LEFT_POEM_TEXT_LEN];
     size_t pos = 0;
     const char *cursor = raw_text;
 
@@ -1548,17 +1704,25 @@ static void dashboard_prepare_poem_text(char *out, size_t out_size,
         return;
     }
 
-    out[0] = '\0';
+    raw_line[0] = '\0';
     if (cursor) {
-        while (*cursor && *cursor != '\r' && *cursor != '\n' && pos + 1 < out_size) {
-            out[pos++] = *cursor++;
+        while (*cursor && *cursor != '\r' && *cursor != '\n' &&
+                pos + 1 < sizeof(raw_line)) {
+            raw_line[pos++] = *cursor++;
         }
-        out[pos] = '\0';
+        raw_line[pos] = '\0';
     }
 
-    if (out[0] == '\0' ||
-            !dashboard_poem_text_supported(out) ||
-            dashboard_measure_poem_text(out) > available_width) {
+    if (raw_line[0] != '\0' &&
+            dashboard_poem_text_supported(raw_line) &&
+            dashboard_measure_poem_text(raw_line) <= available_width) {
+        strncpy(out, raw_line, out_size);
+        out[out_size - 1] = '\0';
+        return;
+    }
+
+    dashboard_extract_supported_poem_fragment(out, out_size, raw_line, available_width);
+    if (out[0] == '\0') {
         dashboard_select_fallback_poem(out, out_size, fallback_index);
     }
 }
@@ -1768,10 +1932,10 @@ static void dashboard_maybe_refresh_weather(void)
 
     xSemaphoreTake(s_state.lock, portMAX_DELAY);
     if (s_state.wifi_connected &&
+            s_state.time_synced &&
             (s_state.last_weather_fetch_tick == 0 ||
             (now_ticks - s_state.last_weather_fetch_tick) >=
                     pdMS_TO_TICKS(CONFIG_HOMEKIT_DASHBOARD_WEATHER_REFRESH_SEC * 1000))) {
-        s_state.last_weather_fetch_tick = now_ticks;
         should_fetch = true;
     }
     xSemaphoreGive(s_state.lock);
@@ -1782,6 +1946,7 @@ static void dashboard_maybe_refresh_weather(void)
 
     if (dashboard_fetch_weather(weather_text, sizeof(weather_text)) == ESP_OK) {
         xSemaphoreTake(s_state.lock, portMAX_DELAY);
+        s_state.last_weather_fetch_tick = now_ticks;
         if (strcmp(weather_text, s_state.weather_text) != 0) {
             strcpy(s_state.weather_text, weather_text);
             s_state.left_dirty = true;
@@ -1802,10 +1967,10 @@ static void dashboard_maybe_refresh_poem(void)
     xSemaphoreTake(s_state.lock, portMAX_DELAY);
     fallback_index = (size_t) (s_state.last_poem_fetch_tick / pdMS_TO_TICKS(POEM_REFRESH_SEC * 1000));
     if (s_state.wifi_connected &&
+            s_state.time_synced &&
             (s_state.last_poem_fetch_tick == 0 ||
             (now_ticks - s_state.last_poem_fetch_tick) >=
                     pdMS_TO_TICKS(POEM_REFRESH_SEC * 1000))) {
-        s_state.last_poem_fetch_tick = now_ticks;
         should_fetch = true;
     }
     xSemaphoreGive(s_state.lock);
@@ -1816,6 +1981,7 @@ static void dashboard_maybe_refresh_poem(void)
 
     if (dashboard_fetch_poem(poem_text, sizeof(poem_text), fallback_index) == ESP_OK) {
         xSemaphoreTake(s_state.lock, portMAX_DELAY);
+        s_state.last_poem_fetch_tick = now_ticks;
         if (strcmp(poem_text, s_state.poem_text) != 0) {
             strcpy(s_state.poem_text, poem_text);
             s_state.left_dirty = true;
@@ -1860,10 +2026,10 @@ static void dashboard_event_handler(void *arg, esp_event_base_t event_base,
         xSemaphoreGive(s_state.lock);
 
         if (!s_state.sntp_started) {
-            setenv("TZ", CONFIG_HOMEKIT_DASHBOARD_TIMEZONE, 1);
-            tzset();
             esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-            esp_sntp_setservername(0, "pool.ntp.org");
+            esp_sntp_setservername(0, "ntp.aliyun.com");
+            esp_sntp_setservername(1, "cn.pool.ntp.org");
+            esp_sntp_setservername(2, "pool.ntp.org");
             esp_sntp_init();
             s_state.sntp_started = true;
         }
@@ -1892,6 +2058,11 @@ void dual_panel_display_init(void)
         ESP_LOGE(TAG, "Failed to create display mutex");
         return;
     }
+
+    setenv("TZ", CONFIG_HOMEKIT_DASHBOARD_TIMEZONE, 1);
+    tzset();
+    s_state.fallback_time_seed = dashboard_build_time_seed();
+    s_state.fallback_time_tick = xTaskGetTickCount();
 
     max_width = CONFIG_HOMEKIT_DASHBOARD_LEFT_H_RES;
     if ((size_t) CONFIG_HOMEKIT_DASHBOARD_LEFT_V_RES > max_width) {
