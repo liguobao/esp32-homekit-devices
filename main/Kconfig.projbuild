@@ -173,6 +173,30 @@ menu "Example Configuration"
             help
                 Output GPIO for the third HomeKit light.
 
+        config HOMEKIT_DASHBOARD_BUTTON_ACTIVE_LOW
+            bool "Dashboard buttons are active low"
+            default y
+            help
+                Keep this enabled when each button shorts the GPIO to GND when pressed.
+
+        config HOMEKIT_DASHBOARD_BUTTON1_GPIO
+            int "Dashboard button 1 GPIO (-1 = disabled)"
+            default -1
+            help
+                Input GPIO for the first dashboard status button shown on the right display.
+
+        config HOMEKIT_DASHBOARD_BUTTON2_GPIO
+            int "Dashboard button 2 GPIO (-1 = disabled)"
+            default -1
+            help
+                Input GPIO for the second dashboard status button shown on the right display.
+
+        config HOMEKIT_DASHBOARD_BUTTON3_GPIO
+            int "Dashboard button 3 GPIO (-1 = disabled)"
+            default -1
+            help
+                Input GPIO for the third dashboard status button shown on the right display.
+
         config HOMEKIT_DASHBOARD_SPI_SCLK
             int "Dashboard shared SPI clock GPIO"
             default 2

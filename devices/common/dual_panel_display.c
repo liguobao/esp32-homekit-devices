@@ -182,6 +182,7 @@ typedef struct {
     char poem_text[LEFT_POEM_TEXT_LEN];
     char last_time_text[LEFT_TIME_TEXT_LEN];
     bool light_states[3];
+    bool button_states[3];
     TickType_t last_weather_fetch_tick;
     TickType_t last_poem_fetch_tick;
     TickType_t fallback_time_tick;
@@ -392,6 +393,36 @@ static const uint8_t s_st7789_negative_gamma[] = {
     0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x31,
     0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E,
 };
+
+static int dashboard_button_gpio(size_t index)
+{
+    static const int s_button_gpios[] = {
+        CONFIG_HOMEKIT_DASHBOARD_BUTTON1_GPIO,
+        CONFIG_HOMEKIT_DASHBOARD_BUTTON2_GPIO,
+        CONFIG_HOMEKIT_DASHBOARD_BUTTON3_GPIO,
+    };
+
+    if (index >= sizeof(s_button_gpios) / sizeof(s_button_gpios[0])) {
+        return -1;
+    }
+    return s_button_gpios[index];
+}
+
+static void dashboard_format_button_status(char *out, size_t out_size,
+        size_t index, bool is_pressed)
+{
+    int gpio = dashboard_button_gpio(index);
+
+    if (!out || out_size == 0) {
+        return;
+    }
+    if (gpio >= 0) {
+        snprintf(out, out_size, "IO%d %s", gpio, is_pressed ? "ON" : "OFF");
+    } else {
+        snprintf(out, out_size, "BTN%u N/A", (unsigned int) (index + 1));
+    }
+    out[out_size - 1] = '\0';
+}
 
 static char dashboard_normalize_char(char c)
 {
@@ -1993,7 +2024,7 @@ static void dashboard_redraw_left(const char *time_text, const char *weather_tex
     dashboard_redraw_left_poem(poem_text);
 }
 
-static void dashboard_redraw_right(const char *ip_text, const bool light_states[3])
+static void dashboard_redraw_right(const char *ip_text, const bool button_states[3])
 {
     int panel_width = dashboard_panel_visible_width(&s_right_panel);
     int panel_height = dashboard_panel_visible_height(&s_right_panel);
@@ -2023,12 +2054,11 @@ static void dashboard_redraw_right(const char *ip_text, const bool light_states[
         for (size_t i = 0; i < 3; i++) {
             char row_text[16];
             int badge_x = badge_gap + (int) i * (badge_width + badge_gap);
-            uint16_t row_color = light_states[i] ? s_right_on : s_right_off;
+            uint16_t row_color = button_states[i] ? s_right_on : s_right_off;
 
             dashboard_panel_fill_rect(&s_right_panel, badge_x, landscape_badge_top,
                     badge_width, landscape_badge_height, row_color);
-            snprintf(row_text, sizeof(row_text), "L%u %s",
-                    (unsigned int) (i + 1), light_states[i] ? "ON" : "OFF");
+            dashboard_format_button_status(row_text, sizeof(row_text), i, button_states[i]);
             dashboard_draw_text_line(&s_right_panel,
                     landscape_badge_top + ((landscape_badge_height - FONT_HEIGHT) / 2),
                     row_text, s_right_text, row_color, 1, true);
@@ -2050,15 +2080,14 @@ static void dashboard_redraw_right(const char *ip_text, const bool light_states[
 
     for (size_t i = 0; i < 3; i++) {
         char row_text[16];
-        uint16_t row_color = light_states[i] ? s_right_on : s_right_off;
+        uint16_t row_color = button_states[i] ? s_right_on : s_right_off;
 
         dashboard_panel_fill_rect(&s_right_panel, 6, row_y + (int) i * row_height,
                 panel_width - 12, row_height - 6, row_color);
-        snprintf(row_text, sizeof(row_text), "L%u %s",
-                (unsigned int) (i + 1), light_states[i] ? "ON" : "OFF");
+        dashboard_format_button_status(row_text, sizeof(row_text), i, button_states[i]);
         dashboard_draw_text_line(&s_right_panel,
                 row_y + 10 + (int) i * row_height,
-                row_text, s_right_text, row_color, RIGHT_BODY_SCALE, true);
+                row_text, s_right_text, row_color, 1, true);
         if (i < 2) {
             dashboard_panel_fill_rect(&s_right_panel, 10,
                     row_y + (int) (i + 1) * row_height - 3,
@@ -2077,7 +2106,7 @@ static void dashboard_render_if_needed(void)
     bool left_time_dirty;
     bool right_dirty;
     bool wifi_connected;
-    bool lights[3];
+    bool buttons[3];
 
     xSemaphoreTake(s_state.lock, portMAX_DELAY);
     left_dirty = s_state.left_dirty;
@@ -2088,7 +2117,7 @@ static void dashboard_render_if_needed(void)
     strcpy(poem_text, s_state.poem_text);
     strcpy(ip_text, s_state.ip_text);
     wifi_connected = s_state.wifi_connected;
-    memcpy(lights, s_state.light_states, sizeof(lights));
+    memcpy(buttons, s_state.button_states, sizeof(buttons));
     s_state.left_dirty = false;
     s_state.left_time_dirty = false;
     s_state.right_dirty = false;
@@ -2100,7 +2129,7 @@ static void dashboard_render_if_needed(void)
         dashboard_refresh_left_time(time_text);
     }
     if (right_dirty && s_state.right_available) {
-        dashboard_redraw_right(ip_text, lights);
+        dashboard_redraw_right(ip_text, buttons);
     }
 }
 
@@ -2184,7 +2213,7 @@ static void dashboard_display_task(void *arg)
         dashboard_maybe_refresh_weather();
         dashboard_maybe_refresh_poem();
         dashboard_render_if_needed();
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
 
@@ -2371,6 +2400,19 @@ void dual_panel_display_set_light(size_t index, bool is_on)
     xSemaphoreTake(s_state.lock, portMAX_DELAY);
     if (s_state.light_states[index] != is_on) {
         s_state.light_states[index] = is_on;
+    }
+    xSemaphoreGive(s_state.lock);
+}
+
+void dual_panel_display_set_button(size_t index, bool is_pressed)
+{
+    if (!s_state.lock || index >= 3) {
+        return;
+    }
+
+    xSemaphoreTake(s_state.lock, portMAX_DELAY);
+    if (s_state.button_states[index] != is_pressed) {
+        s_state.button_states[index] = is_pressed;
         s_state.right_dirty = true;
     }
     xSemaphoreGive(s_state.lock);
