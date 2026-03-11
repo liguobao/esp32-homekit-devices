@@ -14,11 +14,9 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
-#include "esp_crt_bundle.h"
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
-#include "esp_http_client.h"
 #include "esp_lcd_io_spi.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -189,7 +187,6 @@ typedef struct {
     bool left_detail_dirty;
     bool left_poem_dirty;
     bool right_dirty;
-    bool poem_refresh_requested;
     bool sntp_started;
     char ip_text[24];
     char location_text[24];
@@ -199,10 +196,7 @@ typedef struct {
     char last_time_text[LEFT_TIME_TEXT_LEN];
     bool light_states[3];
     bool button_states[3];
-    size_t poem_refresh_serial;
     int right_otp_remaining;
-    TickType_t last_weather_fetch_tick;
-    TickType_t last_poem_fetch_tick;
     TickType_t fallback_time_tick;
     time_t fallback_time_seed;
     SemaphoreHandle_t lock;
@@ -263,7 +257,7 @@ static dashboard_state_t s_state = {
     .ip_text = "NO WIFI",
     .location_text = "LOCATING",
     .right_otp_text = "NO KEY",
-    .weather_text = "WEATHER --",
+    .weather_text = "Weather --",
     .poem_text = "SHI CI LOADING",
     .last_time_text = "----.--.-- --:--:--",
     .right_otp_remaining = TOTP_PERIOD_SEC,
@@ -376,11 +370,11 @@ static const uint16_t s_left_detail_text = RGB565(18, 48, 46);
 static const uint16_t s_left_secondary = RGB565(226, 244, 230);
 static const uint16_t s_left_poem_background = RGB565(109, 104, 212);
 static const uint16_t s_left_poem_text = RGB565(255, 238, 186);
-static const uint16_t s_right_background = RGB565(18, 20, 24);
-static const uint16_t s_right_header = RGB565(44, 78, 126);
-static const uint16_t s_right_text = RGB565(245, 247, 250);
-static const uint16_t s_right_on = RGB565(35, 110, 48);
-static const uint16_t s_right_off = RGB565(122, 32, 40);
+static const uint16_t s_right_background = RGB565(82, 178, 122);
+static const uint16_t s_right_header = RGB565(244, 124, 72);
+static const uint16_t s_right_text = RGB565(252, 249, 241);
+static const uint16_t s_right_status_on = RGB565(226, 244, 230);
+static const uint16_t s_right_status_off = RGB565(246, 215, 196);
 static const uint8_t s_st7789_ramctrl[2] = { 0x00, 0xE0 };
 static const uint8_t s_st7789_positive_gamma[] = {
     0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x32,
@@ -391,8 +385,11 @@ static const uint8_t s_st7789_negative_gamma[] = {
     0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E,
 };
 
-static int dashboard_ascii_strcasecmp(const char *left, const char *right);
 static void dashboard_update_right_otp_cache(time_t now, bool time_synced);
+static void dashboard_draw_char(dashboard_panel_t *panel,
+        int x, int y, char c, uint16_t color, uint8_t scale);
+static void dashboard_draw_cjk16_char(dashboard_panel_t *panel,
+        int x, int y, uint16_t codepoint, uint16_t color);
 
 static char dashboard_normalize_char(char c)
 {
@@ -989,6 +986,26 @@ static int dashboard_measure_text(const char *text, uint8_t scale)
     return width;
 }
 
+static int dashboard_measure_mixed_text(const char *text, uint8_t ascii_scale)
+{
+    int width = 0;
+    const char *cursor = text;
+
+    while (cursor && *cursor) {
+        uint16_t codepoint;
+
+        if (!dashboard_utf8_next_codepoint(&cursor, &codepoint)) {
+            break;
+        }
+        if (codepoint < 0x80) {
+            width += (FONT_WIDTH + 1) * ascii_scale;
+        } else {
+            width += CJK_GLYPH_WIDTH;
+        }
+    }
+    return width;
+}
+
 static int dashboard_text_origin_x(int panel_width, const char *text,
         uint8_t scale, bool center)
 {
@@ -1019,6 +1036,53 @@ static void dashboard_draw_char(dashboard_panel_t *panel,
                         scale, scale, color);
             }
         }
+    }
+}
+
+static void dashboard_draw_mixed_text_line(dashboard_panel_t *panel,
+        int y, const char *text,
+        uint16_t color, uint16_t background,
+        uint8_t ascii_scale, bool center)
+{
+    int panel_width = dashboard_panel_visible_width(panel);
+    int ascii_height = FONT_HEIGHT * ascii_scale;
+    int line_height = ascii_height > CJK_GLYPH_HEIGHT ? ascii_height : CJK_GLYPH_HEIGHT;
+    int cursor_x = TEXT_PADDING_X;
+    const char *cursor = text;
+
+    if (center && text) {
+        int text_width = dashboard_measure_mixed_text(text, ascii_scale);
+
+        if (text_width > 0 && text_width < panel_width) {
+            cursor_x = (panel_width - text_width) / 2;
+        }
+    }
+
+    dashboard_panel_fill_rect(panel, 0, y - 1, panel_width, line_height + 2, background);
+
+    while (cursor && *cursor) {
+        uint16_t codepoint;
+        int glyph_width;
+
+        if (!dashboard_utf8_next_codepoint(&cursor, &codepoint)) {
+            break;
+        }
+
+        glyph_width = codepoint < 0x80 ? (FONT_WIDTH + 1) * ascii_scale : CJK_GLYPH_WIDTH;
+        if (cursor_x + glyph_width > panel_width - TEXT_PADDING_X) {
+            break;
+        }
+
+        if (codepoint < 0x80) {
+            dashboard_draw_char(panel, cursor_x,
+                    y + ((line_height - ascii_height) / 2),
+                    (char) codepoint, color, ascii_scale);
+        } else {
+            dashboard_draw_cjk16_char(panel, cursor_x,
+                    y + ((line_height - CJK_GLYPH_HEIGHT) / 2),
+                    codepoint, color);
+        }
+        cursor_x += glyph_width;
     }
 }
 
@@ -1336,47 +1400,8 @@ static void dashboard_update_time_cache(void)
     }
     dashboard_update_right_otp_cache(display_now, s_state.time_synced);
     if (!time_was_synced && s_state.time_synced) {
-        s_state.last_weather_fetch_tick = 0;
-        s_state.last_poem_fetch_tick = 0;
         s_state.left_detail_dirty = true;
         s_state.left_poem_dirty = true;
-    }
-}
-
-static void dashboard_sanitize_ascii(char *text)
-{
-    char *read_ptr = text;
-    char *write_ptr = text;
-
-    while (*read_ptr) {
-        unsigned char ch = (unsigned char) *read_ptr;
-
-        if (ch == '\r' || ch == '\n') {
-            read_ptr++;
-            continue;
-        }
-        if (ch >= 32 && ch <= 126) {
-            *write_ptr++ = (char) ch;
-            read_ptr++;
-        } else {
-            if (write_ptr == text || write_ptr[-1] != ' ') {
-                *write_ptr++ = ' ';
-            }
-            if ((ch & 0xE0) == 0xC0) {
-                read_ptr += 2;
-            } else if ((ch & 0xF0) == 0xE0) {
-                read_ptr += 3;
-            } else if ((ch & 0xF8) == 0xF0) {
-                read_ptr += 4;
-            } else {
-                read_ptr++;
-            }
-        }
-    }
-    *write_ptr = '\0';
-
-    while (write_ptr > text && write_ptr[-1] == ' ') {
-        *--write_ptr = '\0';
     }
 }
 
@@ -1406,15 +1431,23 @@ static void dashboard_compact_spaces(char *text)
     *write_ptr = '\0';
 }
 
-static size_t dashboard_left_line_char_limit(uint8_t scale)
+static void dashboard_trim_last_utf8_codepoint(char *text)
 {
-    int panel_width = dashboard_panel_visible_width(&s_left_panel);
-    int cell_width = (FONT_WIDTH + 1) * scale;
+    size_t length;
 
-    if (cell_width <= 0 || panel_width <= 12) {
-        return 1;
+    if (!text) {
+        return;
     }
-    return (size_t) ((panel_width - 12) / cell_width);
+
+    length = strlen(text);
+    while (length > 0) {
+        length--;
+        if ((((unsigned char) text[length]) & 0xC0) != 0x80) {
+            text[length] = '\0';
+            return;
+        }
+    }
+    text[0] = '\0';
 }
 
 static void dashboard_fit_text_for_line(char *text, size_t max_chars)
@@ -1447,107 +1480,6 @@ static void dashboard_fit_text_for_line(char *text, size_t max_chars)
     }
     text[cut] = '\0';
     dashboard_compact_spaces(text);
-}
-
-typedef struct {
-    const char *name;
-    const char *label;
-    const char *latitude;
-    const char *longitude;
-} weather_city_t;
-
-static const weather_city_t s_weather_cities[] = {
-    { "shanghai", "SHANGHAI", "31.23", "121.47" },
-    { "beijing", "BEIJING", "39.90", "116.40" },
-    { "shenzhen", "SHENZHEN", "22.54", "114.06" },
-    { "guangzhou", "GUANGZHOU", "23.13", "113.27" },
-};
-
-static const weather_city_t *dashboard_select_weather_city(void)
-{
-    const weather_city_t *city = &s_weather_cities[0];
-
-    for (size_t i = 0; i < sizeof(s_weather_cities) / sizeof(s_weather_cities[0]); i++) {
-        if (dashboard_ascii_strcasecmp(CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION,
-                s_weather_cities[i].name) == 0) {
-            city = &s_weather_cities[i];
-            break;
-        }
-    }
-    return city;
-}
-
-static void dashboard_normalize_location_label(char *out, size_t out_size,
-        const char *src, const char *fallback)
-{
-    size_t pos = 0;
-    bool last_was_space = true;
-
-    if (!out || out_size == 0) {
-        return;
-    }
-
-    if (!src || src[0] == '\0') {
-        strncpy(out, fallback, out_size);
-        out[out_size - 1] = '\0';
-        return;
-    }
-
-    while (*src && pos + 1 < out_size) {
-        char ch = *src++;
-
-        if (ch >= 'a' && ch <= 'z') {
-            ch = (char) (ch - ('a' - 'A'));
-        } else if (ch == '_' || ch == ',') {
-            ch = ' ';
-        }
-
-        if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
-            out[pos++] = ch;
-            last_was_space = false;
-        } else if (!last_was_space && ch == ' ') {
-            out[pos++] = ' ';
-            last_was_space = true;
-        }
-    }
-
-    if (pos > 0 && out[pos - 1] == ' ') {
-        pos--;
-    }
-    if (pos == 0) {
-        strncpy(out, fallback, out_size);
-        out[out_size - 1] = '\0';
-        return;
-    }
-    out[pos] = '\0';
-}
-
-static void dashboard_build_location_label(char *out, size_t out_size)
-{
-    const weather_city_t *default_city = dashboard_select_weather_city();
-    const char *src = CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION;
-    const char *fallback = src && src[0] != '\0' ? default_city->label : "LOCATING";
-
-    dashboard_normalize_location_label(out, out_size, src, fallback);
-}
-
-static int dashboard_ascii_strcasecmp(const char *left, const char *right)
-{
-    while (*left && *right) {
-        char a = *left++;
-        char b = *right++;
-
-        if (a >= 'a' && a <= 'z') {
-            a = (char) (a - ('a' - 'A'));
-        }
-        if (b >= 'a' && b <= 'z') {
-            b = (char) (b - ('a' - 'A'));
-        }
-        if (a != b) {
-            return (int) ((unsigned char) a - (unsigned char) b);
-        }
-    }
-    return (int) ((unsigned char) *left - (unsigned char) *right);
 }
 
 static int dashboard_base32_value(char ch)
@@ -1698,94 +1630,6 @@ static void dashboard_update_right_otp_cache(time_t now, bool time_synced)
         s_state.right_otp_remaining = next_remaining;
         s_state.right_dirty = true;
     }
-}
-
-static bool dashboard_json_extract_number(const char *json, const char *key,
-        char *out, size_t out_size)
-{
-    const char *cursor;
-    size_t pos = 0;
-    bool saw_digit = false;
-
-    if (!json || !key || !out || out_size == 0) {
-        return false;
-    }
-
-    cursor = strstr(json, key);
-    if (!cursor) {
-        return false;
-    }
-
-    cursor = strchr(cursor, ':');
-    if (!cursor) {
-        return false;
-    }
-    cursor++;
-
-    while (*cursor == ' ' || *cursor == '\t') {
-        cursor++;
-    }
-    if (*cursor == '-' || *cursor == '+') {
-        if (pos + 1 >= out_size) {
-            return false;
-        }
-        out[pos++] = *cursor++;
-    }
-    while ((*cursor >= '0' && *cursor <= '9') || *cursor == '.') {
-        if (pos + 1 >= out_size) {
-            break;
-        }
-        out[pos++] = *cursor++;
-        saw_digit = true;
-    }
-
-    out[pos] = '\0';
-    return saw_digit;
-}
-
-static bool dashboard_json_extract_string(const char *json, const char *key,
-        char *out, size_t out_size)
-{
-    const char *cursor;
-    size_t pos = 0;
-
-    if (!json || !key || !out || out_size == 0) {
-        return false;
-    }
-
-    cursor = strstr(json, key);
-    if (!cursor) {
-        return false;
-    }
-
-    cursor = strchr(cursor, ':');
-    if (!cursor) {
-        return false;
-    }
-    cursor++;
-
-    while (*cursor == ' ' || *cursor == '\t') {
-        cursor++;
-    }
-    if (*cursor != '"') {
-        return false;
-    }
-    cursor++;
-
-    while (*cursor && *cursor != '"' && pos + 1 < out_size) {
-        char ch = *cursor++;
-
-        if (ch == '\\' && *cursor) {
-            ch = *cursor++;
-        }
-        if ((unsigned char) ch < 32) {
-            continue;
-        }
-        out[pos++] = ch;
-    }
-
-    out[pos] = '\0';
-    return pos > 0;
 }
 
 static bool dashboard_codepoint_renderable(uint16_t codepoint)
@@ -1955,44 +1799,6 @@ static bool dashboard_prepare_poem_pinyin_text(char *out, size_t out_size,
     return true;
 }
 
-static const char *dashboard_weather_code_text(int code)
-{
-    if (code == 0) {
-        return "CLEAR";
-    }
-    if (code == 1) {
-        return "MOSTLY CLEAR";
-    }
-    if (code == 2) {
-        return "PARTLY CLOUDY";
-    }
-    if (code == 3) {
-        return "CLOUDY";
-    }
-    if (code == 45 || code == 48) {
-        return "FOG";
-    }
-    if (code >= 51 && code <= 57) {
-        return "DRIZZLE";
-    }
-    if (code >= 61 && code <= 67) {
-        return "RAIN";
-    }
-    if (code >= 71 && code <= 77) {
-        return "SNOW";
-    }
-    if (code >= 80 && code <= 82) {
-        return "SHOWERS";
-    }
-    if (code >= 85 && code <= 86) {
-        return "SNOW SHOWERS";
-    }
-    if (code >= 95) {
-        return "THUNDER";
-    }
-    return "WEATHER";
-}
-
 static void dashboard_extract_supported_poem_fragment(char *out, size_t out_size,
         const char *raw_text, int available_width)
 {
@@ -2066,211 +1872,6 @@ static void dashboard_extract_supported_poem_fragment(char *out, size_t out_size
     }
 }
 
-static esp_err_t dashboard_http_get_text(const char *url, int timeout_ms,
-        char *out, size_t out_size)
-{
-    esp_http_client_config_t http_config = {
-        .timeout_ms = timeout_ms,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .url = url,
-    };
-    esp_http_client_handle_t client;
-    esp_err_t err;
-    int read_len;
-
-    if (!out || out_size == 0 || !url || url[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    client = esp_http_client_init(&http_config);
-    if (!client) {
-        return ESP_FAIL;
-    }
-
-    err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        return err;
-    }
-
-    (void) esp_http_client_fetch_headers(client);
-    read_len = esp_http_client_read_response(client, out, (int) out_size - 1);
-    if (read_len < 0) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
-    }
-    out[read_len] = '\0';
-
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    return ESP_OK;
-}
-
-static esp_err_t dashboard_fetch_weather_open_meteo_at(const char *latitude,
-        const char *longitude, char *out, size_t out_size)
-{
-    const char *current_section;
-    char url[192];
-    char response[384];
-    char temp_text[16];
-    char code_text[16];
-    int weather_code;
-
-    snprintf(url, sizeof(url),
-            "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
-            "&current=temperature_2m,weather_code&timezone=Asia%%2FShanghai",
-            latitude, longitude);
-
-    if (dashboard_http_get_text(url, 6000, response, sizeof(response)) != ESP_OK) {
-        return ESP_FAIL;
-    }
-    current_section = strstr(response, "\"current\":");
-    if (!current_section) {
-        return ESP_FAIL;
-    }
-    if (!dashboard_json_extract_number(current_section, "\"temperature_2m\"",
-            temp_text, sizeof(temp_text))) {
-        return ESP_FAIL;
-    }
-    if (!dashboard_json_extract_number(current_section, "\"weather_code\"",
-            code_text, sizeof(code_text))) {
-        return ESP_FAIL;
-    }
-
-    weather_code = (int) strtol(code_text, NULL, 10);
-    snprintf(out, out_size, "%sC %s", temp_text, dashboard_weather_code_text(weather_code));
-    out[out_size - 1] = '\0';
-    dashboard_compact_spaces(out);
-    return ESP_OK;
-}
-
-static esp_err_t dashboard_fetch_weather_open_meteo(char *out, size_t out_size)
-{
-    const weather_city_t *city = dashboard_select_weather_city();
-
-    return dashboard_fetch_weather_open_meteo_at(city->latitude, city->longitude, out, out_size);
-}
-
-static esp_err_t dashboard_fetch_weather_location_ipwhois(char *location_out,
-        size_t location_out_size, char *latitude_out, size_t latitude_out_size,
-        char *longitude_out, size_t longitude_out_size)
-{
-    char response[1024];
-    char city[32];
-
-    if (!location_out || location_out_size == 0 ||
-            !latitude_out || latitude_out_size == 0 ||
-            !longitude_out || longitude_out_size == 0) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (dashboard_http_get_text("https://ipwho.is/", 5000, response, sizeof(response)) != ESP_OK) {
-        return ESP_FAIL;
-    }
-    if (!strstr(response, "\"success\": true") && !strstr(response, "\"success\":true")) {
-        return ESP_FAIL;
-    }
-    if (!dashboard_json_extract_string(response, "\"city\"", city, sizeof(city)) ||
-            !dashboard_json_extract_number(response, "\"latitude\"",
-                    latitude_out, latitude_out_size) ||
-            !dashboard_json_extract_number(response, "\"longitude\"",
-                    longitude_out, longitude_out_size)) {
-        return ESP_FAIL;
-    }
-
-    dashboard_normalize_location_label(location_out, location_out_size, city, "LOCAL");
-    return ESP_OK;
-}
-
-static esp_err_t dashboard_fetch_weather_wttr_text(const char *location,
-        char *out, size_t out_size)
-{
-    char url[160];
-
-    if (location && location[0] != '\0') {
-        snprintf(url, sizeof(url),
-                "https://wttr.in/%s?format=%%25t%%20%%25C",
-                location);
-    } else {
-        strncpy(url, "https://wttr.in/?format=%25t%20%25C", sizeof(url));
-        url[sizeof(url) - 1] = '\0';
-    }
-
-    if (dashboard_http_get_text(url, 5000, out, out_size) == ESP_OK) {
-        dashboard_sanitize_ascii(out);
-        dashboard_compact_spaces(out);
-        if (out[0] != '\0') {
-            return ESP_OK;
-        }
-    }
-
-    if (location && location[0] != '\0') {
-        snprintf(url, sizeof(url),
-                "https://w.r2049.cn/en-wttr?location=%s",
-                location);
-    } else {
-        strncpy(url, "https://w.r2049.cn/en-wttr", sizeof(url));
-        url[sizeof(url) - 1] = '\0';
-    }
-
-    if (dashboard_http_get_text(url, 5000, out, out_size) == ESP_OK) {
-        char *line_end = strchr(out, '\n');
-
-        if (line_end) {
-            *line_end = '\0';
-        }
-        dashboard_sanitize_ascii(out);
-        dashboard_compact_spaces(out);
-        if (out[0] != '\0') {
-            return ESP_OK;
-        }
-    }
-
-    return ESP_FAIL;
-}
-
-static esp_err_t dashboard_fetch_weather(char *location_out, size_t location_out_size,
-        char *weather_out, size_t weather_out_size)
-{
-    char latitude[24];
-    char longitude[24];
-
-    if (!location_out || location_out_size == 0 || !weather_out || weather_out_size == 0) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION[0] != '\0') {
-        dashboard_build_location_label(location_out, location_out_size);
-
-        if (dashboard_fetch_weather_open_meteo(weather_out, weather_out_size) == ESP_OK) {
-            return ESP_OK;
-        }
-        if (dashboard_fetch_weather_wttr_text(CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION,
-                weather_out, weather_out_size) == ESP_OK) {
-            return ESP_OK;
-        }
-    } else {
-        if (dashboard_fetch_weather_location_ipwhois(location_out, location_out_size,
-                latitude, sizeof(latitude), longitude, sizeof(longitude)) == ESP_OK &&
-                dashboard_fetch_weather_open_meteo_at(latitude, longitude,
-                        weather_out, weather_out_size) == ESP_OK) {
-            return ESP_OK;
-        }
-
-        dashboard_build_location_label(location_out, location_out_size);
-        if (dashboard_fetch_weather_wttr_text(NULL, weather_out, weather_out_size) == ESP_OK) {
-            return ESP_OK;
-        }
-        if (dashboard_fetch_weather_open_meteo(weather_out, weather_out_size) == ESP_OK) {
-            return ESP_OK;
-        }
-    }
-
-    strncpy(weather_out, "WEATHER --", weather_out_size);
-    weather_out[weather_out_size - 1] = '\0';
-    return ESP_OK;
-}
-
 static void dashboard_select_fallback_poem(char *out, size_t out_size, size_t index)
 {
     static const char *const s_poem_fallbacks[] = {
@@ -2331,22 +1932,6 @@ static void dashboard_prepare_poem_text(char *out, size_t out_size,
     }
 }
 
-static esp_err_t dashboard_fetch_poem(char *out, size_t out_size, size_t fallback_index)
-{
-    char raw_text[96];
-    esp_err_t err;
-
-    err = dashboard_http_get_text("https://v1.jinrishici.com/all.txt", 8000,
-            raw_text, sizeof(raw_text));
-    if (err != ESP_OK) {
-        dashboard_select_fallback_poem(out, out_size, fallback_index);
-        return ESP_OK;
-    }
-
-    dashboard_prepare_poem_text(out, out_size, raw_text, fallback_index);
-    return ESP_OK;
-}
-
 static int dashboard_left_header_height(void)
 {
     return FONT_HEIGHT * LEFT_TIME_SCALE + 10;
@@ -2375,27 +1960,66 @@ static int dashboard_left_poem_y(void)
     return dashboard_left_poem_band_y() + 3;
 }
 
+static void dashboard_format_left_weather_summary(char *out, size_t out_size,
+        const char *weather_text, bool wifi_connected)
+{
+    if (!wifi_connected) {
+        strncpy(out, "Offline", out_size);
+        out[out_size - 1] = '\0';
+    } else if (weather_text && weather_text[0] != '\0') {
+        strncpy(out, weather_text, out_size);
+        out[out_size - 1] = '\0';
+    } else {
+        strncpy(out, "Weather --", out_size);
+        out[out_size - 1] = '\0';
+    }
+}
+
 static void dashboard_format_left_detail(char *out, size_t out_size,
         const char *location_text, const char *weather_text, bool wifi_connected)
 {
+    char location[sizeof(s_state.location_text)];
     char summary[sizeof(s_state.weather_text)];
-    size_t line_limit = dashboard_left_line_char_limit(LEFT_DETAIL_SCALE);
-    const char *location = (location_text && location_text[0] != '\0') ? location_text : "LOCATING";
+    int available_width;
 
-    if (!wifi_connected) {
-        strncpy(summary, "OFFLINE", sizeof(summary));
-        summary[sizeof(summary) - 1] = '\0';
-    } else if (weather_text && weather_text[0] != '\0') {
-        strncpy(summary, weather_text, sizeof(summary));
-        summary[sizeof(summary) - 1] = '\0';
-    } else {
-        strncpy(summary, "WEATHER --", sizeof(summary));
-        summary[sizeof(summary) - 1] = '\0';
+    if (!out || out_size == 0) {
+        return;
     }
 
-    snprintf(out, out_size, "%s %s", location, summary);
+    strncpy(location,
+            (location_text && location_text[0] != '\0') ? location_text : "LOCATING",
+            sizeof(location));
+    location[sizeof(location) - 1] = '\0';
+    dashboard_format_left_weather_summary(summary, sizeof(summary), weather_text, wifi_connected);
+    available_width = dashboard_panel_visible_width(&s_left_panel) - TEXT_PADDING_X * 2;
+
+    if (dashboard_measure_mixed_text(summary, LEFT_DETAIL_SCALE) >= available_width) {
+        strncpy(out, summary, out_size);
+        out[out_size - 1] = '\0';
+        return;
+    }
+
+    if (location[0] != '\0') {
+        snprintf(out, out_size, "%s %s", location, summary);
+        out[out_size - 1] = '\0';
+        while (location[0] != '\0' &&
+                dashboard_measure_mixed_text(out, LEFT_DETAIL_SCALE) > available_width) {
+            dashboard_trim_last_utf8_codepoint(location);
+            dashboard_compact_spaces(location);
+            if (location[0] != '\0') {
+                snprintf(out, out_size, "%s %s", location, summary);
+            } else {
+                snprintf(out, out_size, "%s", summary);
+            }
+            out[out_size - 1] = '\0';
+        }
+        if (location[0] != '\0') {
+            return;
+        }
+    }
+
+    snprintf(out, out_size, "%s", summary);
     out[out_size - 1] = '\0';
-    dashboard_fit_text_for_line(out, line_limit);
 }
 
 static void dashboard_redraw_left_frame(void)
@@ -2433,7 +2057,7 @@ static void dashboard_redraw_left_detail(const char *location_text,
 
     dashboard_format_left_detail(detail_text, sizeof(detail_text),
             location_text, weather_text, wifi_connected);
-    dashboard_draw_text_line(&s_left_panel, dashboard_left_detail_y(), detail_text,
+    dashboard_draw_mixed_text_line(&s_left_panel, dashboard_left_detail_y(), detail_text,
             wifi_connected ? s_left_detail_text : s_left_secondary,
             s_left_background, LEFT_DETAIL_SCALE, false);
 }
@@ -2461,23 +2085,32 @@ static void dashboard_redraw_right(const char *otp_text, int otp_remaining,
 {
     int panel_width = dashboard_panel_visible_width(&s_right_panel);
     int panel_height = dashboard_panel_visible_height(&s_right_panel);
-    int row_gap = panel_width > panel_height ? 4 : 6;
-    int row_height = (panel_height - row_gap * 4) / 3;
-    int row1_y = row_gap;
-    int row2_y = row1_y + row_height + row_gap;
-    int row3_y = row2_y + row_height + row_gap;
+    int divider_height = panel_height >= 90 ? 2 : 1;
+    int usable_height = panel_height - divider_height * 2;
+    int row1_height = usable_height / 3;
+    int row2_height = usable_height / 3;
+    int row3_height = usable_height - row1_height - row2_height;
+    int row1_y = 0;
+    int row2_y = row1_y + row1_height + divider_height;
+    int row3_y = row2_y + row2_height + divider_height;
     char row1_text[24];
 
-    if (row_height < FONT_HEIGHT + 6) {
-        row_height = FONT_HEIGHT + 6;
+    if (row1_height < FONT_HEIGHT + 6) {
+        row1_height = FONT_HEIGHT + 6;
+    }
+    if (row2_height < 1) {
+        row2_height = 1;
+    }
+    if (row3_height < 1) {
+        row3_height = 1;
     }
 
     dashboard_panel_fill_rect(&s_right_panel, 0, 0, panel_width, panel_height, s_right_background);
-    dashboard_panel_fill_rect(&s_right_panel, 6, row1_y, panel_width - 12, row_height, s_right_header);
-    dashboard_panel_fill_rect(&s_right_panel, 6, row2_y, panel_width - 12, row_height,
-            button_states[1] ? s_right_on : s_right_off);
-    dashboard_panel_fill_rect(&s_right_panel, 6, row3_y, panel_width - 12, row_height,
-            button_states[2] ? s_right_on : s_right_off);
+    dashboard_panel_fill_rect(&s_right_panel, 0, row1_y, panel_width, row1_height, s_right_header);
+    dashboard_panel_fill_rect(&s_right_panel, 0, row2_y, panel_width, row2_height,
+            button_states[1] ? s_right_status_on : s_right_status_off);
+    dashboard_panel_fill_rect(&s_right_panel, 0, row3_y, panel_width, row3_height,
+            button_states[2] ? s_right_status_on : s_right_status_off);
 
     if (otp_remaining > 0) {
         snprintf(row1_text, sizeof(row1_text), "%s %02dS", otp_text, otp_remaining);
@@ -2486,7 +2119,7 @@ static void dashboard_redraw_right(const char *otp_text, int otp_remaining,
     }
     row1_text[sizeof(row1_text) - 1] = '\0';
     dashboard_draw_text_line(&s_right_panel,
-            row1_y + ((row_height - FONT_HEIGHT * RIGHT_BODY_SCALE) / 2),
+            row1_y + ((row1_height - FONT_HEIGHT * RIGHT_BODY_SCALE) / 2),
             row1_text, s_right_text, s_right_header,
             panel_width > 120 ? RIGHT_BODY_SCALE : 1, true);
 }
@@ -2546,94 +2179,6 @@ static void dashboard_render_if_needed(void)
     }
 }
 
-static void dashboard_maybe_refresh_weather(void)
-{
-    TickType_t now_ticks = xTaskGetTickCount();
-    bool should_fetch = false;
-    char location_text[sizeof(s_state.location_text)];
-    char weather_text[sizeof(s_state.weather_text)];
-
-    xSemaphoreTake(s_state.lock, portMAX_DELAY);
-    if (s_state.wifi_connected &&
-            s_state.time_synced &&
-            (s_state.last_weather_fetch_tick == 0 ||
-            (now_ticks - s_state.last_weather_fetch_tick) >=
-                    pdMS_TO_TICKS(CONFIG_HOMEKIT_DASHBOARD_WEATHER_REFRESH_SEC * 1000))) {
-        should_fetch = true;
-    }
-    xSemaphoreGive(s_state.lock);
-
-    if (!should_fetch) {
-        return;
-    }
-
-    if (dashboard_fetch_weather(location_text, sizeof(location_text),
-            weather_text, sizeof(weather_text)) == ESP_OK) {
-        xSemaphoreTake(s_state.lock, portMAX_DELAY);
-        s_state.last_weather_fetch_tick = now_ticks;
-        if (strcmp(location_text, s_state.location_text) != 0) {
-            strcpy(s_state.location_text, location_text);
-            s_state.left_detail_dirty = true;
-        }
-        if (strcmp(weather_text, s_state.weather_text) != 0) {
-            strcpy(s_state.weather_text, weather_text);
-            s_state.left_detail_dirty = true;
-        }
-        xSemaphoreGive(s_state.lock);
-    } else {
-        ESP_LOGW(TAG, "Weather fetch failed");
-    }
-}
-
-static void dashboard_maybe_refresh_poem(void)
-{
-    TickType_t now_ticks = xTaskGetTickCount();
-    bool should_fetch = false;
-    bool force_refresh = false;
-    bool can_fetch_online = false;
-    bool refresh_ok = false;
-    char poem_text[sizeof(s_state.poem_text)];
-    size_t fallback_index = 0;
-
-    xSemaphoreTake(s_state.lock, portMAX_DELAY);
-    fallback_index = s_state.poem_refresh_serial;
-    can_fetch_online = s_state.wifi_connected && s_state.time_synced;
-    force_refresh = s_state.poem_refresh_requested;
-    if (force_refresh) {
-        should_fetch = true;
-        s_state.poem_refresh_requested = false;
-    } else if (can_fetch_online &&
-            (s_state.last_poem_fetch_tick == 0 ||
-            (now_ticks - s_state.last_poem_fetch_tick) >=
-                    pdMS_TO_TICKS(POEM_REFRESH_SEC * 1000))) {
-        should_fetch = true;
-    }
-    xSemaphoreGive(s_state.lock);
-
-    if (!should_fetch) {
-        return;
-    }
-
-    if (can_fetch_online) {
-        refresh_ok = dashboard_fetch_poem(poem_text, sizeof(poem_text), fallback_index) == ESP_OK;
-    }
-    if (!refresh_ok) {
-        dashboard_select_fallback_poem(poem_text, sizeof(poem_text), fallback_index);
-        refresh_ok = true;
-    }
-
-    if (refresh_ok) {
-        xSemaphoreTake(s_state.lock, portMAX_DELAY);
-        s_state.last_poem_fetch_tick = now_ticks;
-        s_state.poem_refresh_serial++;
-        if (strcmp(poem_text, s_state.poem_text) != 0 || force_refresh) {
-            strcpy(s_state.poem_text, poem_text);
-            s_state.left_poem_dirty = true;
-        }
-        xSemaphoreGive(s_state.lock);
-    }
-}
-
 static void dashboard_display_task(void *arg)
 {
     (void) arg;
@@ -2643,8 +2188,6 @@ static void dashboard_display_task(void *arg)
         dashboard_update_time_cache();
         xSemaphoreGive(s_state.lock);
 
-        dashboard_maybe_refresh_weather();
-        dashboard_maybe_refresh_poem();
         dashboard_render_if_needed();
         vTaskDelay(pdMS_TO_TICKS(200));
     }
@@ -2663,8 +2206,6 @@ static void dashboard_event_handler(void *arg, esp_event_base_t event_base,
         s_state.wifi_connected = true;
         s_state.right_dirty = true;
         s_state.left_detail_dirty = true;
-        s_state.last_weather_fetch_tick = 0;
-        s_state.last_poem_fetch_tick = 0;
         xSemaphoreGive(s_state.lock);
 
         if (!s_state.sntp_started) {
@@ -2708,7 +2249,6 @@ void dual_panel_display_init(void)
     tzset();
     s_state.fallback_time_seed = dashboard_build_time_seed();
     s_state.fallback_time_tick = xTaskGetTickCount();
-    dashboard_build_location_label(s_state.location_text, sizeof(s_state.location_text));
 
     max_width = CONFIG_HOMEKIT_DASHBOARD_LEFT_H_RES;
     if ((size_t) CONFIG_HOMEKIT_DASHBOARD_LEFT_V_RES > max_width) {
@@ -2852,6 +2392,46 @@ void dual_panel_display_set_button(size_t index, bool is_pressed)
     xSemaphoreGive(s_state.lock);
 }
 
+void dual_panel_display_set_location_weather(const char *location_text, const char *weather_text)
+{
+    bool detail_dirty = false;
+
+    if (!s_state.lock) {
+        return;
+    }
+
+    xSemaphoreTake(s_state.lock, portMAX_DELAY);
+    if (location_text && strcmp(location_text, s_state.location_text) != 0) {
+        strncpy(s_state.location_text, location_text, sizeof(s_state.location_text));
+        s_state.location_text[sizeof(s_state.location_text) - 1] = '\0';
+        detail_dirty = true;
+    }
+    if (weather_text && strcmp(weather_text, s_state.weather_text) != 0) {
+        strncpy(s_state.weather_text, weather_text, sizeof(s_state.weather_text));
+        s_state.weather_text[sizeof(s_state.weather_text) - 1] = '\0';
+        detail_dirty = true;
+    }
+    if (detail_dirty) {
+        s_state.left_detail_dirty = true;
+    }
+    xSemaphoreGive(s_state.lock);
+}
+
+void dual_panel_display_set_poem(const char *poem_text)
+{
+    if (!s_state.lock || !poem_text) {
+        return;
+    }
+
+    xSemaphoreTake(s_state.lock, portMAX_DELAY);
+    if (strcmp(poem_text, s_state.poem_text) != 0) {
+        strncpy(s_state.poem_text, poem_text, sizeof(s_state.poem_text));
+        s_state.poem_text[sizeof(s_state.poem_text) - 1] = '\0';
+        s_state.left_poem_dirty = true;
+    }
+    xSemaphoreGive(s_state.lock);
+}
+
 void dual_panel_display_request_right_refresh(void)
 {
     if (!s_state.lock) {
@@ -2860,16 +2440,5 @@ void dual_panel_display_request_right_refresh(void)
 
     xSemaphoreTake(s_state.lock, portMAX_DELAY);
     s_state.right_dirty = true;
-    xSemaphoreGive(s_state.lock);
-}
-
-void dual_panel_display_request_poem_refresh(void)
-{
-    if (!s_state.lock) {
-        return;
-    }
-
-    xSemaphoreTake(s_state.lock, portMAX_DELAY);
-    s_state.poem_refresh_requested = true;
     xSemaphoreGive(s_state.lock);
 }

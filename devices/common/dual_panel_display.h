@@ -8,7 +8,8 @@ void dual_panel_display_init(void);
 void dual_panel_display_start(void);
 void dual_panel_display_set_light(size_t index, bool is_on);
 void dual_panel_display_set_button(size_t index, bool is_pressed);
-void dual_panel_display_request_poem_refresh(void);
+void dual_panel_display_set_location_weather(const char *location_text, const char *weather_text);
+void dual_panel_display_set_poem(const char *poem_text);
 void dual_panel_display_request_right_refresh(void);
 
 #endif /* DUAL_PANEL_DISPLAY_H_ */
