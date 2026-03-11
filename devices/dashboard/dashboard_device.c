@@ -67,7 +67,13 @@ static void dashboard_button_poll_task(void *arg)
             if (last_levels[i] != level) {
                 last_levels[i] = level;
                 dashboard_button_log_state(i, gpio, level);
-                dual_panel_display_set_button(i, dashboard_button_is_pressed(level));
+                if (i == 0) {
+                    if (dashboard_button_is_pressed(level)) {
+                        dual_panel_display_request_poem_refresh();
+                    }
+                } else {
+                    dual_panel_display_set_button(i, dashboard_button_is_pressed(level));
+                }
             }
         }
 

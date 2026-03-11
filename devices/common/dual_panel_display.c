@@ -106,12 +106,13 @@ static const char *TAG = "dual_panel";
 #define FONT_WIDTH 5
 #define FONT_HEIGHT 7
 #define LEFT_TIME_SCALE 2
-#define LEFT_BODY_SCALE 1
+#define LEFT_DETAIL_SCALE 2
 #define RIGHT_TITLE_SCALE 2
 #define RIGHT_BODY_SCALE 2
 #define LEFT_TIME_TEXT_LEN 24
 #define LEFT_DETAIL_TEXT_LEN 64
 #define LEFT_POEM_TEXT_LEN 64
+#define LEFT_POEM_PINYIN_LEN 256
 #define CJK_GLYPH_WIDTH 16
 #define CJK_GLYPH_HEIGHT 16
 #define POEM_REFRESH_SEC (5 * 60)
@@ -131,6 +132,11 @@ typedef struct {
     uint16_t codepoint;
     uint8_t rows[CJK_GLYPH_HEIGHT * 2];
 } cjk16_glyph_t;
+
+typedef struct {
+    uint16_t codepoint;
+    uint16_t syllable_index;
+} poem_pinyin_entry_t;
 
 typedef enum {
     PANEL_CONTROLLER_ST7789 = 0,
@@ -175,7 +181,10 @@ typedef struct {
     bool time_synced;
     bool left_dirty;
     bool left_time_dirty;
+    bool left_detail_dirty;
+    bool left_poem_dirty;
     bool right_dirty;
+    bool poem_refresh_requested;
     bool sntp_started;
     char ip_text[24];
     char weather_text[40];
@@ -183,6 +192,7 @@ typedef struct {
     char last_time_text[LEFT_TIME_TEXT_LEN];
     bool light_states[3];
     bool button_states[3];
+    size_t poem_refresh_serial;
     TickType_t last_weather_fetch_tick;
     TickType_t last_poem_fetch_tick;
     TickType_t fallback_time_tick;
@@ -235,32 +245,9 @@ static const font_glyph_t s_font[] = {
     { 'Z', {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F} },
 };
 
-static const cjk16_glyph_t s_cjk16_font[] = {
-    { 0x6625, {0x01, 0x00, 0x01, 0x00, 0x3F, 0xFC, 0x01, 0x00, 0x1F, 0xFC, 0x02, 0x00, 0x7F, 0xFE, 0x0C, 0x20, 0x08, 0x10, 0x1F, 0xF8, 0x68, 0x16, 0x4F, 0xF2, 0x08, 0x10, 0x08, 0x10, 0x0F, 0xF0, 0x08, 0x10} }, /* 春 */
-    { 0x7720, {0x7D, 0xFC, 0x45, 0x04, 0x45, 0x04, 0x45, 0x04, 0x7D, 0xFC, 0x45, 0x10, 0x45, 0x10, 0x45, 0xFE, 0x7D, 0x10, 0x45, 0x10, 0x45, 0x10, 0x45, 0x08, 0x7D, 0x0A, 0x45, 0xE6, 0x00, 0x00, 0x00, 0x00} }, /* 眠 */
-    { 0x4E0D, {0x7F, 0xFE, 0x00, 0x80, 0x01, 0x00, 0x03, 0x00, 0x03, 0x60, 0x05, 0x30, 0x09, 0x18, 0x31, 0x04, 0x61, 0x02, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00} }, /* 不 */
-    { 0x89C9, {0x01, 0x00, 0x19, 0x18, 0x08, 0x90, 0x7F, 0xFE, 0x40, 0x02, 0x40, 0x02, 0x4F, 0xF2, 0x08, 0x10, 0x09, 0x10, 0x09, 0x10, 0x09, 0x10, 0x09, 0xD0, 0x03, 0xC2, 0x06, 0xC2, 0x78, 0x7C, 0x00, 0x00} }, /* 觉 */
-    { 0x6653, {0x00, 0x40, 0x78, 0x4E, 0x4B, 0xF0, 0x48, 0x48, 0x48, 0x38, 0x48, 0x32, 0x48, 0xD2, 0x7B, 0x0E, 0x48, 0x00, 0x4B, 0xFE, 0x48, 0x90, 0x48, 0x90, 0x78, 0x90, 0x41, 0x12, 0x06, 0x1E, 0x00, 0x00} }, /* 晓 */
-    { 0x660E, {0x00, 0xFE, 0x7E, 0x82, 0x22, 0x82, 0x22, 0x82, 0x22, 0xFE, 0x3E, 0x82, 0x22, 0x82, 0x22, 0x82, 0x22, 0xFE, 0x3E, 0x82, 0x63, 0x82, 0x01, 0x02, 0x03, 0x02, 0x06, 0x1C, 0x00, 0x00, 0x00, 0x00} }, /* 明 */
-    { 0x6708, {0x0F, 0xF8, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0F, 0xF8, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x1F, 0xF8, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x20, 0x08, 0x60, 0x78, 0x00, 0x00, 0x00, 0x00} }, /* 月 */
-    { 0x677E, {0x10, 0x00, 0x10, 0xD0, 0x10, 0x88, 0x10, 0x88, 0x7C, 0x84, 0x11, 0x04, 0x1B, 0x22, 0x34, 0x42, 0x34, 0x40, 0x50, 0x40, 0x50, 0x88, 0x10, 0x8C, 0x10, 0x84, 0x11, 0x3E, 0x13, 0xC2, 0x10, 0x00} }, /* 松 */
-    { 0x95F4, {0x13, 0xFE, 0x18, 0x06, 0x08, 0x06, 0x40, 0x06, 0x47, 0xE6, 0x44, 0x26, 0x44, 0x26, 0x47, 0xE6, 0x44, 0x26, 0x44, 0x26, 0x44, 0x26, 0x47, 0xE6, 0x44, 0x06, 0x44, 0x06, 0x40, 0x1C, 0x00, 0x00} }, /* 间 */
-    { 0x7167, {0x3D, 0xFE, 0x24, 0x42, 0x24, 0x42, 0x24, 0x84, 0x3D, 0x1C, 0x24, 0x00, 0x25, 0xFC, 0x25, 0x04, 0x25, 0x04, 0x3D, 0xFC, 0x00, 0x00, 0x12, 0x4C, 0x22, 0x44, 0x62, 0x42, 0x00, 0x00, 0x00, 0x00} }, /* 照 */
-    { 0x5C71, {0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x21, 0x04, 0x3F, 0xFC, 0x00, 0x04, 0x00, 0x00} }, /* 山 */
-    { 0x6C14, {0x08, 0x00, 0x08, 0x00, 0x1F, 0xFC, 0x10, 0x00, 0x20, 0x00, 0x6F, 0xF8, 0x40, 0x00, 0x3F, 0xF0, 0x00, 0x10, 0x00, 0x10, 0x00, 0x10, 0x00, 0x12, 0x00, 0x0A, 0x00, 0x0A, 0x00, 0x06, 0x00, 0x00} }, /* 气 */
-    { 0x65E5, {0x1F, 0xF8, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x1F, 0xF8, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x10, 0x08, 0x1F, 0xF8, 0x10, 0x08, 0x00, 0x00, 0x00, 0x00} }, /* 日 */
-    { 0x5915, {0x01, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0xFC, 0x04, 0x0C, 0x0C, 0x08, 0x18, 0x08, 0x33, 0x10, 0x21, 0xB0, 0x00, 0x60, 0x00, 0x40, 0x00, 0x80, 0x01, 0x00, 0x06, 0x00, 0x1C, 0x00, 0x10, 0x00} }, /* 夕 */
-    { 0x4F73, {0x08, 0x40, 0x08, 0x40, 0x18, 0x40, 0x17, 0xFC, 0x30, 0x40, 0x30, 0x40, 0x57, 0xFE, 0xD0, 0x00, 0x10, 0x40, 0x10, 0x40, 0x17, 0xFE, 0x10, 0x40, 0x10, 0x40, 0x10, 0x40, 0x1F, 0xFE, 0x30, 0x00} }, /* 佳 */
-    { 0x591C, {0x01, 0x80, 0x7F, 0xFE, 0x00, 0x80, 0x08, 0x80, 0x09, 0xFC, 0x11, 0x04, 0x32, 0x48, 0x77, 0x28, 0x5D, 0x10, 0x10, 0x90, 0x10, 0x60, 0x10, 0xE0, 0x11, 0x98, 0x17, 0x0E, 0x14, 0x02, 0x00, 0x00} }, /* 夜 */
-    { 0x534A, {0x01, 0x00, 0x21, 0x08, 0x11, 0x08, 0x09, 0x10, 0x0D, 0x30, 0x01, 0x00, 0x3F, 0xFC, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x7F, 0xFE, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00} }, /* 半 */
-    { 0x949F, {0x10, 0x30, 0x20, 0x20, 0x3E, 0x20, 0x40, 0x20, 0x41, 0xFE, 0x3D, 0x22, 0x11, 0x22, 0x11, 0x22, 0x11, 0x22, 0x7F, 0xFE, 0x11, 0x22, 0x10, 0x20, 0x12, 0x20, 0x16, 0x20, 0x18, 0x20, 0x00, 0x30} }, /* 钟 */
-    { 0x58F0, {0x01, 0x80, 0x01, 0x00, 0x7F, 0xFE, 0x01, 0x00, 0x01, 0x00, 0x3F, 0xFC, 0x00, 0x00, 0x1F, 0xF8, 0x11, 0x08, 0x11, 0x08, 0x1F, 0xF8, 0x20, 0x08, 0x20, 0x00, 0x20, 0x00, 0x40, 0x00, 0x40, 0x00} }, /* 声 */
-    { 0x5230, {0x7F, 0xA2, 0x08, 0x22, 0x13, 0x22, 0x11, 0x22, 0x27, 0xA2, 0x78, 0xE2, 0x04, 0x22, 0x04, 0x22, 0x3F, 0xA2, 0x04, 0x22, 0x04, 0x22, 0x05, 0x82, 0x7E, 0x02, 0x00, 0x1E, 0x00, 0x00, 0x00, 0x00} }, /* 到 */
-    { 0x6C5F, {0x20, 0x00, 0x13, 0xFE, 0x08, 0x40, 0x00, 0x40, 0x60, 0x40, 0x30, 0x40, 0x10, 0x40, 0x00, 0x40, 0x00, 0x40, 0x10, 0x40, 0x10, 0x40, 0x20, 0x40, 0x67, 0xFE, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00} }, /* 江 */
-    { 0x6E05, {0x00, 0x40, 0x20, 0x40, 0x17, 0xFE, 0x00, 0x40, 0x07, 0xFC, 0x40, 0x40, 0x37, 0xFE, 0x10, 0x00, 0x03, 0xFC, 0x02, 0x04, 0x13, 0xFC, 0x12, 0x04, 0x23, 0xFC, 0x62, 0x04, 0x42, 0x1C, 0x00, 0x00} }, /* 清 */
-    { 0x8FD1, {0x00, 0x04, 0x60, 0x1C, 0x31, 0xE0, 0x11, 0x00, 0x01, 0x00, 0x01, 0xFE, 0x01, 0x10, 0x71, 0x10, 0x11, 0x10, 0x11, 0x10, 0x12, 0x10, 0x12, 0x10, 0x32, 0x10, 0x6C, 0x00, 0x47, 0xFE, 0x00, 0x00} }, /* 近 */
-    { 0x4EBA, {0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x02, 0x40, 0x02, 0x40, 0x06, 0x20, 0x04, 0x30, 0x08, 0x18, 0x10, 0x0C, 0x60, 0x06, 0x00, 0x00, 0x00, 0x00} }, /* 人 */
-};
+#include "dashboard_cjk16_font.inc"
+
+#include "dashboard_poem_pinyin_table.inc"
 
 static dashboard_panel_t s_left_panel;
 static dashboard_panel_t s_right_panel;
@@ -457,9 +444,19 @@ static const font_glyph_t *dashboard_find_glyph(char c)
 
 static const cjk16_glyph_t *dashboard_find_cjk16_glyph(uint16_t codepoint)
 {
-    for (size_t i = 0; i < sizeof(s_cjk16_font) / sizeof(s_cjk16_font[0]); i++) {
-        if (s_cjk16_font[i].codepoint == codepoint) {
-            return &s_cjk16_font[i];
+    size_t left = 0;
+    size_t right = sizeof(s_cjk16_font) / sizeof(s_cjk16_font[0]);
+
+    while (left < right) {
+        size_t mid = left + (right - left) / 2;
+
+        if (s_cjk16_font[mid].codepoint == codepoint) {
+            return &s_cjk16_font[mid];
+        }
+        if (s_cjk16_font[mid].codepoint < codepoint) {
+            left = mid + 1;
+        } else {
+            right = mid;
         }
     }
     return NULL;
@@ -1581,6 +1578,165 @@ static bool dashboard_codepoint_renderable(uint16_t codepoint)
     return dashboard_find_cjk16_glyph(codepoint) != NULL;
 }
 
+static const char *dashboard_poem_pinyin_lookup(uint16_t codepoint)
+{
+    size_t left = 0;
+    size_t right = sizeof(s_poem_pinyin_entries) / sizeof(s_poem_pinyin_entries[0]);
+
+    while (left < right) {
+        size_t mid = left + (right - left) / 2;
+        uint16_t mid_codepoint = s_poem_pinyin_entries[mid].codepoint;
+
+        if (mid_codepoint == codepoint) {
+            return s_poem_pinyin_syllables[s_poem_pinyin_entries[mid].syllable_index];
+        }
+        if (mid_codepoint < codepoint) {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    return NULL;
+}
+
+static bool dashboard_poem_codepoint_is_separator(uint16_t codepoint)
+{
+    switch (codepoint) {
+    case ' ':
+    case ',':
+    case '.':
+    case ';':
+    case ':':
+    case '!':
+    case '?':
+    case '-':
+    case '/':
+    case 0x3000: /* ideographic space */
+    case 0x3001: /* 、 */
+    case 0x3002: /* 。 */
+    case 0x300A: /* 《 */
+    case 0x300B: /* 》 */
+    case 0xFF01: /* ！ */
+    case 0xFF08: /* （ */
+    case 0xFF09: /* ） */
+    case 0xFF0C: /* ， */
+    case 0xFF1A: /* ： */
+    case 0xFF1B: /* ； */
+    case 0xFF1F: /* ？ */
+    case 0x2014: /* — */
+    case 0x2018: /* ‘ */
+    case 0x2019: /* ’ */
+    case 0x201C: /* “ */
+    case 0x201D: /* ” */
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void dashboard_append_poem_ascii(char *out, size_t out_size,
+        size_t *pos, bool *last_was_space, const char *text)
+{
+    while (text && *text && *pos + 1 < out_size) {
+        char ch = *text++;
+
+        if (ch == ' ') {
+            if (*last_was_space) {
+                continue;
+            }
+            *last_was_space = true;
+        } else {
+            *last_was_space = false;
+        }
+        out[(*pos)++] = ch;
+    }
+    out[*pos] = '\0';
+}
+
+static bool dashboard_build_poem_pinyin(char *out, size_t out_size, const char *raw_text)
+{
+    const char *cursor = raw_text;
+    size_t pos = 0;
+    bool last_was_space = true;
+    bool wrote_content = false;
+
+    if (!out || out_size == 0) {
+        return false;
+    }
+
+    out[0] = '\0';
+    while (cursor && *cursor && *cursor != '\r' && *cursor != '\n') {
+        uint16_t codepoint;
+
+        if (!dashboard_utf8_next_codepoint(&cursor, &codepoint)) {
+            break;
+        }
+
+        if (codepoint < 0x80) {
+            char ascii_text[2] = {0};
+
+            if ((codepoint >= '0' && codepoint <= '9') ||
+                    (codepoint >= 'A' && codepoint <= 'Z') ||
+                    (codepoint >= 'a' && codepoint <= 'z')) {
+                ascii_text[0] = (char) codepoint;
+                dashboard_append_poem_ascii(out, out_size, &pos, &last_was_space, ascii_text);
+                wrote_content = true;
+            } else if (dashboard_poem_codepoint_is_separator(codepoint)) {
+                dashboard_append_poem_ascii(out, out_size, &pos, &last_was_space, " ");
+            }
+            continue;
+        }
+
+        if (dashboard_poem_codepoint_is_separator(codepoint)) {
+            dashboard_append_poem_ascii(out, out_size, &pos, &last_was_space, " ");
+            continue;
+        }
+
+        {
+            const char *pinyin = dashboard_poem_pinyin_lookup(codepoint);
+
+            if (pinyin && pinyin[0] != '\0') {
+                dashboard_append_poem_ascii(out, out_size, &pos, &last_was_space, pinyin);
+                dashboard_append_poem_ascii(out, out_size, &pos, &last_was_space, " ");
+            } else {
+                dashboard_append_poem_ascii(out, out_size, &pos, &last_was_space, "? ");
+            }
+            wrote_content = true;
+        }
+    }
+
+    dashboard_compact_spaces(out);
+    return wrote_content && out[0] != '\0';
+}
+
+static bool dashboard_prepare_poem_pinyin_text(char *out, size_t out_size,
+        const char *raw_text, int available_width)
+{
+    char pinyin_text[LEFT_POEM_PINYIN_LEN];
+    size_t ascii_limit;
+
+    if (!out || out_size == 0 || available_width <= 0) {
+        return false;
+    }
+    if (!dashboard_build_poem_pinyin(pinyin_text, sizeof(pinyin_text), raw_text)) {
+        return false;
+    }
+
+    ascii_limit = (size_t) (available_width / (FONT_WIDTH + 1));
+    if (ascii_limit == 0) {
+        return false;
+    }
+
+    dashboard_fit_text_for_line(pinyin_text, ascii_limit);
+    if (pinyin_text[0] == '\0') {
+        return false;
+    }
+
+    strncpy(out, pinyin_text, out_size);
+    out[out_size - 1] = '\0';
+    return true;
+}
+
 static const char *dashboard_weather_code_text(int code)
 {
     if (code == 0) {
@@ -1893,6 +2049,11 @@ static void dashboard_prepare_poem_text(char *out, size_t out_size,
         return;
     }
 
+    if (raw_line[0] != '\0' &&
+            dashboard_prepare_poem_pinyin_text(out, out_size, raw_line, available_width)) {
+        return;
+    }
+
     dashboard_extract_supported_poem_fragment(out, out_size, raw_line, available_width);
     if (out[0] == '\0') {
         dashboard_select_fallback_poem(out, out_size, fallback_index);
@@ -1927,7 +2088,7 @@ static int dashboard_left_time_y(void)
 
 static int dashboard_left_detail_y(void)
 {
-    return dashboard_left_header_height() + 5;
+    return dashboard_left_header_height() + 4;
 }
 
 static int dashboard_left_poem_band_y(void)
@@ -1948,7 +2109,7 @@ static void dashboard_format_left_detail(char *out, size_t out_size,
 {
     char location[24];
     char summary[sizeof(s_state.weather_text)];
-    size_t line_limit = dashboard_left_line_char_limit(LEFT_BODY_SCALE);
+    size_t line_limit = dashboard_left_line_char_limit(LEFT_DETAIL_SCALE);
 
     dashboard_build_location_label(location, sizeof(location));
 
@@ -2003,7 +2164,7 @@ static void dashboard_redraw_left_detail(const char *weather_text, bool wifi_con
     dashboard_format_left_detail(detail_text, sizeof(detail_text), weather_text, wifi_connected);
     dashboard_draw_text_line(&s_left_panel, dashboard_left_detail_y(), detail_text,
             wifi_connected ? s_left_detail_text : s_left_secondary,
-            s_left_background, LEFT_BODY_SCALE, false);
+            s_left_background, LEFT_DETAIL_SCALE, false);
 }
 
 static void dashboard_redraw_left_poem(const char *poem_text)
@@ -2104,6 +2265,8 @@ static void dashboard_render_if_needed(void)
     char ip_text[sizeof(s_state.ip_text)];
     bool left_dirty;
     bool left_time_dirty;
+    bool left_detail_dirty;
+    bool left_poem_dirty;
     bool right_dirty;
     bool wifi_connected;
     bool buttons[3];
@@ -2111,6 +2274,8 @@ static void dashboard_render_if_needed(void)
     xSemaphoreTake(s_state.lock, portMAX_DELAY);
     left_dirty = s_state.left_dirty;
     left_time_dirty = s_state.left_time_dirty;
+    left_detail_dirty = s_state.left_detail_dirty;
+    left_poem_dirty = s_state.left_poem_dirty;
     right_dirty = s_state.right_dirty;
     strcpy(time_text, s_state.last_time_text);
     strcpy(weather_text, s_state.weather_text);
@@ -2120,13 +2285,23 @@ static void dashboard_render_if_needed(void)
     memcpy(buttons, s_state.button_states, sizeof(buttons));
     s_state.left_dirty = false;
     s_state.left_time_dirty = false;
+    s_state.left_detail_dirty = false;
+    s_state.left_poem_dirty = false;
     s_state.right_dirty = false;
     xSemaphoreGive(s_state.lock);
 
     if (left_dirty && s_state.left_available) {
         dashboard_redraw_left(time_text, weather_text, poem_text, wifi_connected);
-    } else if (left_time_dirty && s_state.left_available) {
-        dashboard_refresh_left_time(time_text);
+    } else if (s_state.left_available) {
+        if (left_time_dirty) {
+            dashboard_refresh_left_time(time_text);
+        }
+        if (left_detail_dirty) {
+            dashboard_redraw_left_detail(weather_text, wifi_connected);
+        }
+        if (left_poem_dirty) {
+            dashboard_redraw_left_poem(poem_text);
+        }
     }
     if (right_dirty && s_state.right_available) {
         dashboard_redraw_right(ip_text, buttons);
@@ -2158,7 +2333,7 @@ static void dashboard_maybe_refresh_weather(void)
         s_state.last_weather_fetch_tick = now_ticks;
         if (strcmp(weather_text, s_state.weather_text) != 0) {
             strcpy(s_state.weather_text, weather_text);
-            s_state.left_dirty = true;
+            s_state.left_detail_dirty = true;
         }
         xSemaphoreGive(s_state.lock);
     } else {
@@ -2170,13 +2345,20 @@ static void dashboard_maybe_refresh_poem(void)
 {
     TickType_t now_ticks = xTaskGetTickCount();
     bool should_fetch = false;
+    bool force_refresh = false;
+    bool can_fetch_online = false;
+    bool refresh_ok = false;
     char poem_text[sizeof(s_state.poem_text)];
-    size_t fallback_index;
+    size_t fallback_index = 0;
 
     xSemaphoreTake(s_state.lock, portMAX_DELAY);
-    fallback_index = (size_t) (s_state.last_poem_fetch_tick / pdMS_TO_TICKS(POEM_REFRESH_SEC * 1000));
-    if (s_state.wifi_connected &&
-            s_state.time_synced &&
+    fallback_index = s_state.poem_refresh_serial;
+    can_fetch_online = s_state.wifi_connected && s_state.time_synced;
+    force_refresh = s_state.poem_refresh_requested;
+    if (force_refresh) {
+        should_fetch = true;
+        s_state.poem_refresh_requested = false;
+    } else if (can_fetch_online &&
             (s_state.last_poem_fetch_tick == 0 ||
             (now_ticks - s_state.last_poem_fetch_tick) >=
                     pdMS_TO_TICKS(POEM_REFRESH_SEC * 1000))) {
@@ -2188,16 +2370,23 @@ static void dashboard_maybe_refresh_poem(void)
         return;
     }
 
-    if (dashboard_fetch_poem(poem_text, sizeof(poem_text), fallback_index) == ESP_OK) {
+    if (can_fetch_online) {
+        refresh_ok = dashboard_fetch_poem(poem_text, sizeof(poem_text), fallback_index) == ESP_OK;
+    }
+    if (!refresh_ok) {
+        dashboard_select_fallback_poem(poem_text, sizeof(poem_text), fallback_index);
+        refresh_ok = true;
+    }
+
+    if (refresh_ok) {
         xSemaphoreTake(s_state.lock, portMAX_DELAY);
         s_state.last_poem_fetch_tick = now_ticks;
-        if (strcmp(poem_text, s_state.poem_text) != 0) {
+        s_state.poem_refresh_serial++;
+        if (strcmp(poem_text, s_state.poem_text) != 0 || force_refresh) {
             strcpy(s_state.poem_text, poem_text);
-            s_state.left_dirty = true;
+            s_state.left_poem_dirty = true;
         }
         xSemaphoreGive(s_state.lock);
-    } else {
-        ESP_LOGW(TAG, "Poem fetch failed");
     }
 }
 
@@ -2229,7 +2418,7 @@ static void dashboard_event_handler(void *arg, esp_event_base_t event_base,
         snprintf(s_state.ip_text, sizeof(s_state.ip_text), IPSTR, IP2STR(&event->ip_info.ip));
         s_state.wifi_connected = true;
         s_state.right_dirty = true;
-        s_state.left_dirty = true;
+        s_state.left_detail_dirty = true;
         s_state.last_weather_fetch_tick = 0;
         s_state.last_poem_fetch_tick = 0;
         xSemaphoreGive(s_state.lock);
@@ -2247,7 +2436,7 @@ static void dashboard_event_handler(void *arg, esp_event_base_t event_base,
         strcpy(s_state.ip_text, "NO WIFI");
         s_state.wifi_connected = false;
         s_state.right_dirty = true;
-        s_state.left_dirty = true;
+        s_state.left_detail_dirty = true;
         xSemaphoreGive(s_state.lock);
     }
 }
@@ -2415,5 +2604,16 @@ void dual_panel_display_set_button(size_t index, bool is_pressed)
         s_state.button_states[index] = is_pressed;
         s_state.right_dirty = true;
     }
+    xSemaphoreGive(s_state.lock);
+}
+
+void dual_panel_display_request_poem_refresh(void)
+{
+    if (!s_state.lock) {
+        return;
+    }
+
+    xSemaphoreTake(s_state.lock, portMAX_DELAY);
+    s_state.poem_refresh_requested = true;
     xSemaphoreGive(s_state.lock);
 }
