@@ -35,13 +35,107 @@ function Get-ConfigTarget {
     return $match.Matches[0].Groups[1].Value
 }
 
+function Get-CachedBuildTarget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CachePath
+    )
+
+    if (-not (Test-Path $CachePath)) {
+        return $null
+    }
+
+    $match = Select-String -Path $CachePath -Pattern '^IDF_TARGET:STRING=(.+)$' | Select-Object -First 1
+    if (-not $match) {
+        return $null
+    }
+
+    return $match.Matches[0].Groups[1].Value
+}
+
+function Get-CachedToolchainFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CachePath
+    )
+
+    if (-not (Test-Path $CachePath)) {
+        return $null
+    }
+
+    $match = Select-String -Path $CachePath -Pattern '^CMAKE_TOOLCHAIN_FILE:FILEPATH=(.+)$' | Select-Object -First 1
+    if (-not $match) {
+        return $null
+    }
+
+    return $match.Matches[0].Groups[1].Value
+}
+
+function Test-HasIdfAction {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgsToCheck
+    )
+
+    $idfActions = @(
+        "all",
+        "app",
+        "app-flash",
+        "bootloader",
+        "bootloader-flash",
+        "build",
+        "clean",
+        "dfu",
+        "docs",
+        "efuse-common-table",
+        "erase-flash",
+        "encrypted-app-flash",
+        "encrypted-flash",
+        "encrypted-ota-data-initial",
+        "flash",
+        "fullclean",
+        "menuconfig",
+        "monitor",
+        "partition-table",
+        "partition-table-flash",
+        "python-clean",
+        "reconfigure",
+        "set-target",
+        "show-efuse-table",
+        "size",
+        "size-components",
+        "size-files",
+        "uf2",
+        "uf2-app"
+    )
+
+    foreach ($arg in $ArgsToCheck) {
+        if ($idfActions -contains $arg) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 if (-not $IdfArgs -or $IdfArgs.Count -eq 0) {
     $IdfArgs = @("reconfigure", "flash")
+} elseif (-not (Test-HasIdfAction -ArgsToCheck $IdfArgs)) {
+    $IdfArgs += @("reconfigure", "flash")
 }
 
 $idfTarget = Get-ConfigTarget -ConfigPath (Join-Path $projectDir "sdkconfig")
 if (-not $idfTarget) {
     $idfTarget = Get-ConfigTarget -ConfigPath (Join-Path $projectDir "sdkconfig.defaults")
+}
+
+$buildTarget = Get-CachedBuildTarget -CachePath (Join-Path $projectDir "build\\CMakeCache.txt")
+$bootloaderToolchain = Get-CachedToolchainFile -CachePath (Join-Path $projectDir "build\\bootloader\\CMakeCache.txt")
+$expectedToolchainSuffix = if ($idfTarget) { "toolchain-$idfTarget.cmake" } else { $null }
+
+if (($idfTarget -and $buildTarget -and $idfTarget -ne $buildTarget) -or
+        ($expectedToolchainSuffix -and $bootloaderToolchain -and -not $bootloaderToolchain.EndsWith($expectedToolchainSuffix))) {
+    Remove-Item -Recurse -Force (Join-Path $projectDir "build")
 }
 
 $sdkconfigFiles = @(

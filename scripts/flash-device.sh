@@ -19,8 +19,24 @@ case "$DEVICE_TYPE" in
         ;;
 esac
 
+has_idf_action() {
+    local arg
+
+    for arg in "$@"; do
+        case "$arg" in
+            all|app|app-flash|bootloader|bootloader-flash|build|clean|dfu|docs|efuse-common-table|erase-flash|encrypted-app-flash|encrypted-flash|encrypted-ota-data-initial|flash|fullclean|menuconfig|monitor|partition-table|partition-table-flash|python-clean|reconfigure|set-target|show-efuse-table|size|size-components|size-files|uf2|uf2-app)
+                return 0
+                ;;
+        esac
+    done
+
+    return 1
+}
+
 if [[ $# -eq 0 ]]; then
     set -- reconfigure flash
+elif ! has_idf_action "$@"; then
+    set -- "$@" reconfigure flash
 fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,13 +54,27 @@ get_cached_build_target() {
     sed -n 's/^IDF_TARGET:STRING=\(.*\)$/\1/p' "$cache_file" | head -n 1
 }
 
+get_cached_toolchain_file() {
+    local cache_file="$1"
+    [[ -f "$cache_file" ]] || return 1
+    sed -n 's/^CMAKE_TOOLCHAIN_FILE:FILEPATH=\(.*\)$/\1/p' "$cache_file" | head -n 1
+}
+
 IDF_TARGET_VALUE="$(get_idf_target "$PROJECT_DIR/sdkconfig.defaults" || true)"
 if [[ -z "$IDF_TARGET_VALUE" ]]; then
     IDF_TARGET_VALUE="$(get_idf_target "$PROJECT_DIR/sdkconfig" || true)"
 fi
 
 BUILD_TARGET_VALUE="$(get_cached_build_target "$PROJECT_DIR/build/CMakeCache.txt" || true)"
+BOOTLOADER_TOOLCHAIN_VALUE="$(get_cached_toolchain_file "$PROJECT_DIR/build/bootloader/CMakeCache.txt" || true)"
+EXPECTED_TOOLCHAIN_SUFFIX=""
+if [[ -n "$IDF_TARGET_VALUE" ]]; then
+    EXPECTED_TOOLCHAIN_SUFFIX="toolchain-${IDF_TARGET_VALUE}.cmake"
+fi
+
 if [[ -n "$IDF_TARGET_VALUE" && -n "$BUILD_TARGET_VALUE" && "$IDF_TARGET_VALUE" != "$BUILD_TARGET_VALUE" ]]; then
+    rm -rf "$PROJECT_DIR/build"
+elif [[ -n "$EXPECTED_TOOLCHAIN_SUFFIX" && -n "$BOOTLOADER_TOOLCHAIN_VALUE" && "$BOOTLOADER_TOOLCHAIN_VALUE" != *"$EXPECTED_TOOLCHAIN_SUFFIX" ]]; then
     rm -rf "$PROJECT_DIR/build"
 fi
 

@@ -6,7 +6,7 @@ Runtime behavior:
 
 - Exposes 3 independent HomeKit light services
 - Uses the left `ST7789` strip for time and weather
-- Uses the right `NV3007` strip for IP and light state
+- Uses the right `ST7789/ST7899` compatible strip for IP and light state
 
 Recommended wiring (classic `ESP32`):
 
@@ -18,11 +18,13 @@ Recommended wiring (classic `ESP32`):
   `GPIO17` -> `DC/RS/A0`
   `GPIO21` -> `RST/RES`
   `GPIO22` -> `BL/LED`
-- Right `NV3007` (`142x428`)
-  `GPIO25` -> `CS`
-  `GPIO26` -> `DC/RS/A0`
-  `GPIO27` -> `RST/RES`
-  `GPIO32` -> `BL/LED`
+- Right `ST7789/ST7899` (`76x284`, default dedicated software SPI)
+  `GPIO11` -> `SCL/CLK/SCK`
+  `GPIO5` -> `SDA/MOSI/DIN`
+  `GPIO9` -> `CS`
+  `GPIO8` -> `DC/RS/A0`
+  `GPIO4` -> `RST/RES`
+  `BL/LED` can be tied to `3V3`, or configured separately in `menuconfig` / `sdkconfig.defaults.local`
 - Three light outputs
   `GPIO13` -> Light 1
   `GPIO14` -> Light 2
@@ -32,7 +34,7 @@ Recommended wiring (classic `ESP32`):
   Both panel `GND` pins -> `GND`
 
 If you do not need software backlight control, wire `BL/LED` directly to `3V3`
-and set the matching `BL` option to `-1` in `menuconfig`.
+and set the matching `BL` option to `-1` in `menuconfig` or `sdkconfig.defaults.local`.
 
 Mirror these GPIO values in `menuconfig -> Example Configuration -> Dashboard Device Configuration`.
 
