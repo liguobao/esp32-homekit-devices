@@ -197,6 +197,14 @@ menu "Example Configuration"
             help
                 Input GPIO for the third dashboard status button shown on the right display.
 
+        config HOMEKIT_DASHBOARD_TOTP_SECRET
+            string "Dashboard TOTP secret (Base32, local use)"
+            default ""
+            help
+                Base32-encoded TOTP secret used for the 6-digit code on the
+                right display. Keep this empty in committed defaults and place
+                the real secret only in sdkconfig.defaults.local.
+
         config HOMEKIT_DASHBOARD_SPI_SCLK
             int "Dashboard shared SPI clock GPIO"
             default 2
@@ -403,8 +411,9 @@ menu "Example Configuration"
             string "Weather location slug"
             default ""
             help
-                Optional wttr.in location, for example shanghai or beijing.
-                Leave empty to let wttr.in infer location from the public IP.
+                Optional weather location slug, for example shanghai or beijing.
+                Leave empty to infer the current city from the public IP and
+                fetch weather for that inferred location.
 
         config HOMEKIT_DASHBOARD_WEATHER_REFRESH_SEC
             int "Weather refresh interval (seconds)"

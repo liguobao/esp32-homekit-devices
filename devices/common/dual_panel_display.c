@@ -1,6 +1,7 @@
 #include "dual_panel_display.h"
 
 #include <stdbool.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +28,7 @@
 #include "esp_rom_sys.h"
 #include "esp_sntp.h"
 #include "esp_wifi.h"
+#include "mbedtls/md.h"
 
 static const char *TAG = "dual_panel";
 
@@ -109,12 +111,15 @@ static const char *TAG = "dual_panel";
 #define LEFT_DETAIL_SCALE 2
 #define RIGHT_TITLE_SCALE 2
 #define RIGHT_BODY_SCALE 2
+#define TOTP_DIGITS 6
+#define TOTP_PERIOD_SEC 30
 #define LEFT_TIME_TEXT_LEN 24
 #define LEFT_DETAIL_TEXT_LEN 64
 #define LEFT_POEM_TEXT_LEN 64
 #define LEFT_POEM_PINYIN_LEN 256
 #define CJK_GLYPH_WIDTH 16
 #define CJK_GLYPH_HEIGHT 16
+#define TEXT_PADDING_X 6
 #define POEM_REFRESH_SEC (5 * 60)
 #define PANEL_CMD_DELAY 0xFE
 #define PANEL_CMD_END 0x00
@@ -187,12 +192,15 @@ typedef struct {
     bool poem_refresh_requested;
     bool sntp_started;
     char ip_text[24];
+    char location_text[24];
+    char right_otp_text[16];
     char weather_text[40];
     char poem_text[LEFT_POEM_TEXT_LEN];
     char last_time_text[LEFT_TIME_TEXT_LEN];
     bool light_states[3];
     bool button_states[3];
     size_t poem_refresh_serial;
+    int right_otp_remaining;
     TickType_t last_weather_fetch_tick;
     TickType_t last_poem_fetch_tick;
     TickType_t fallback_time_tick;
@@ -253,9 +261,12 @@ static dashboard_panel_t s_left_panel;
 static dashboard_panel_t s_right_panel;
 static dashboard_state_t s_state = {
     .ip_text = "NO WIFI",
+    .location_text = "LOCATING",
+    .right_otp_text = "NO KEY",
     .weather_text = "WEATHER --",
     .poem_text = "SHI CI LOADING",
     .last_time_text = "----.--.-- --:--:--",
+    .right_otp_remaining = TOTP_PERIOD_SEC,
 };
 static uint16_t *s_line_buffer;
 static size_t s_line_buffer_pixels;
@@ -370,7 +381,6 @@ static const uint16_t s_right_header = RGB565(44, 78, 126);
 static const uint16_t s_right_text = RGB565(245, 247, 250);
 static const uint16_t s_right_on = RGB565(35, 110, 48);
 static const uint16_t s_right_off = RGB565(122, 32, 40);
-static const uint16_t s_right_divider = RGB565(64, 74, 88);
 static const uint8_t s_st7789_ramctrl[2] = { 0x00, 0xE0 };
 static const uint8_t s_st7789_positive_gamma[] = {
     0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x32,
@@ -381,35 +391,8 @@ static const uint8_t s_st7789_negative_gamma[] = {
     0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E,
 };
 
-static int dashboard_button_gpio(size_t index)
-{
-    static const int s_button_gpios[] = {
-        CONFIG_HOMEKIT_DASHBOARD_BUTTON1_GPIO,
-        CONFIG_HOMEKIT_DASHBOARD_BUTTON2_GPIO,
-        CONFIG_HOMEKIT_DASHBOARD_BUTTON3_GPIO,
-    };
-
-    if (index >= sizeof(s_button_gpios) / sizeof(s_button_gpios[0])) {
-        return -1;
-    }
-    return s_button_gpios[index];
-}
-
-static void dashboard_format_button_status(char *out, size_t out_size,
-        size_t index, bool is_pressed)
-{
-    int gpio = dashboard_button_gpio(index);
-
-    if (!out || out_size == 0) {
-        return;
-    }
-    if (gpio >= 0) {
-        snprintf(out, out_size, "IO%d %s", gpio, is_pressed ? "ON" : "OFF");
-    } else {
-        snprintf(out, out_size, "BTN%u N/A", (unsigned int) (index + 1));
-    }
-    out[out_size - 1] = '\0';
-}
+static int dashboard_ascii_strcasecmp(const char *left, const char *right);
+static void dashboard_update_right_otp_cache(time_t now, bool time_synced);
 
 static char dashboard_normalize_char(char c)
 {
@@ -1009,7 +992,7 @@ static int dashboard_measure_text(const char *text, uint8_t scale)
 static int dashboard_text_origin_x(int panel_width, const char *text,
         uint8_t scale, bool center)
 {
-    int cursor_x = 6;
+    int cursor_x = TEXT_PADDING_X;
     int text_width;
 
     if (!center || !text) {
@@ -1113,7 +1096,7 @@ static void dashboard_draw_poem_line(dashboard_panel_t *panel,
     int panel_width = dashboard_panel_visible_width(panel);
     int panel_height = dashboard_panel_visible_height(panel);
     int strip_height = CJK_GLYPH_HEIGHT + 4;
-    int cursor_x = 6;
+    int cursor_x = TEXT_PADDING_X;
     int baseline_y = y;
     const char *cursor = text;
 
@@ -1135,7 +1118,7 @@ static void dashboard_draw_poem_line(dashboard_panel_t *panel,
         }
 
         glyph_width = dashboard_poem_codepoint_width(codepoint);
-        if (cursor_x + glyph_width > panel_width - 4) {
+        if (cursor_x + glyph_width > panel_width - TEXT_PADDING_X) {
             break;
         }
 
@@ -1164,7 +1147,7 @@ static void dashboard_draw_text_line(dashboard_panel_t *panel,
         return;
     }
     while (*text) {
-        if (cursor_x + FONT_WIDTH * scale > panel_width - 4) {
+        if (cursor_x + FONT_WIDTH * scale > panel_width - TEXT_PADDING_X) {
             break;
         }
         dashboard_draw_char(panel, cursor_x, y, *text, color, scale);
@@ -1313,6 +1296,7 @@ static void dashboard_update_time_cache(void)
             strcpy(s_state.last_time_text, "----.--.-- --:--:--");
             s_state.left_time_dirty = true;
         }
+        dashboard_update_right_otp_cache(0, false);
         return;
     }
 
@@ -1350,10 +1334,12 @@ static void dashboard_update_time_cache(void)
         strcpy(s_state.last_time_text, time_text);
         s_state.left_time_dirty = true;
     }
+    dashboard_update_right_otp_cache(display_now, s_state.time_synced);
     if (!time_was_synced && s_state.time_synced) {
         s_state.last_weather_fetch_tick = 0;
         s_state.last_poem_fetch_tick = 0;
-        s_state.left_dirty = true;
+        s_state.left_detail_dirty = true;
+        s_state.left_poem_dirty = true;
     }
 }
 
@@ -1463,9 +1449,37 @@ static void dashboard_fit_text_for_line(char *text, size_t max_chars)
     dashboard_compact_spaces(text);
 }
 
-static void dashboard_build_location_label(char *out, size_t out_size)
+typedef struct {
+    const char *name;
+    const char *label;
+    const char *latitude;
+    const char *longitude;
+} weather_city_t;
+
+static const weather_city_t s_weather_cities[] = {
+    { "shanghai", "SHANGHAI", "31.23", "121.47" },
+    { "beijing", "BEIJING", "39.90", "116.40" },
+    { "shenzhen", "SHENZHEN", "22.54", "114.06" },
+    { "guangzhou", "GUANGZHOU", "23.13", "113.27" },
+};
+
+static const weather_city_t *dashboard_select_weather_city(void)
 {
-    const char *src = CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION;
+    const weather_city_t *city = &s_weather_cities[0];
+
+    for (size_t i = 0; i < sizeof(s_weather_cities) / sizeof(s_weather_cities[0]); i++) {
+        if (dashboard_ascii_strcasecmp(CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION,
+                s_weather_cities[i].name) == 0) {
+            city = &s_weather_cities[i];
+            break;
+        }
+    }
+    return city;
+}
+
+static void dashboard_normalize_location_label(char *out, size_t out_size,
+        const char *src, const char *fallback)
+{
     size_t pos = 0;
     bool last_was_space = true;
 
@@ -1474,7 +1488,7 @@ static void dashboard_build_location_label(char *out, size_t out_size)
     }
 
     if (!src || src[0] == '\0') {
-        strncpy(out, "CITY", out_size);
+        strncpy(out, fallback, out_size);
         out[out_size - 1] = '\0';
         return;
     }
@@ -1501,11 +1515,20 @@ static void dashboard_build_location_label(char *out, size_t out_size)
         pos--;
     }
     if (pos == 0) {
-        strncpy(out, "CITY", out_size);
+        strncpy(out, fallback, out_size);
         out[out_size - 1] = '\0';
         return;
     }
     out[pos] = '\0';
+}
+
+static void dashboard_build_location_label(char *out, size_t out_size)
+{
+    const weather_city_t *default_city = dashboard_select_weather_city();
+    const char *src = CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION;
+    const char *fallback = src && src[0] != '\0' ? default_city->label : "LOCATING";
+
+    dashboard_normalize_location_label(out, out_size, src, fallback);
 }
 
 static int dashboard_ascii_strcasecmp(const char *left, const char *right)
@@ -1525,6 +1548,156 @@ static int dashboard_ascii_strcasecmp(const char *left, const char *right)
         }
     }
     return (int) ((unsigned char) *left - (unsigned char) *right);
+}
+
+static int dashboard_base32_value(char ch)
+{
+    if (ch >= 'A' && ch <= 'Z') {
+        return ch - 'A';
+    }
+    if (ch >= 'a' && ch <= 'z') {
+        return ch - 'a';
+    }
+    if (ch >= '2' && ch <= '7') {
+        return 26 + (ch - '2');
+    }
+    return -1;
+}
+
+static bool dashboard_totp_decode_secret(uint8_t *out, size_t out_size, size_t *out_len)
+{
+    static bool s_loaded;
+    static bool s_valid;
+    static uint8_t s_secret[64];
+    static size_t s_secret_len;
+    uint32_t buffer = 0;
+    int bits_left = 0;
+
+    if (!out || out_size == 0 || !out_len) {
+        return false;
+    }
+
+    if (!s_loaded) {
+        const char *cursor = CONFIG_HOMEKIT_DASHBOARD_TOTP_SECRET;
+
+        s_loaded = true;
+        s_valid = false;
+        s_secret_len = 0;
+        if (cursor && cursor[0] != '\0') {
+            while (*cursor) {
+                int value;
+                char ch = *cursor++;
+
+                if (ch == ' ' || ch == '-' || ch == '=') {
+                    continue;
+                }
+
+                value = dashboard_base32_value(ch);
+                if (value < 0) {
+                    s_secret_len = 0;
+                    break;
+                }
+
+                buffer = (buffer << 5) | (uint32_t) value;
+                bits_left += 5;
+                while (bits_left >= 8) {
+                    if (s_secret_len >= sizeof(s_secret)) {
+                        s_secret_len = 0;
+                        bits_left = 0;
+                        break;
+                    }
+                    bits_left -= 8;
+                    s_secret[s_secret_len++] = (uint8_t) ((buffer >> bits_left) & 0xFFU);
+                }
+                if (s_secret_len == 0 && bits_left == 0 && *cursor != '\0') {
+                    break;
+                }
+            }
+            s_valid = s_secret_len > 0;
+        }
+    }
+
+    if (!s_valid || s_secret_len > out_size) {
+        return false;
+    }
+
+    memcpy(out, s_secret, s_secret_len);
+    *out_len = s_secret_len;
+    return true;
+}
+
+static bool dashboard_totp_generate(time_t now, char *out, size_t out_size, int *remaining_out)
+{
+    uint8_t secret[64];
+    size_t secret_len = 0;
+    unsigned char hmac[20];
+    unsigned char counter[8];
+    const mbedtls_md_info_t *md_info;
+    uint64_t timestep;
+    uint32_t binary;
+    uint32_t otp;
+    size_t offset;
+
+    if (!out || out_size == 0 || !remaining_out) {
+        return false;
+    }
+    if (!dashboard_totp_decode_secret(secret, sizeof(secret), &secret_len)) {
+        return false;
+    }
+    if (now <= 0) {
+        return false;
+    }
+
+    *remaining_out = TOTP_PERIOD_SEC - (int) (now % TOTP_PERIOD_SEC);
+    if (*remaining_out <= 0 || *remaining_out > TOTP_PERIOD_SEC) {
+        *remaining_out = TOTP_PERIOD_SEC;
+    }
+
+    timestep = (uint64_t) now / TOTP_PERIOD_SEC;
+    for (int i = 7; i >= 0; i--) {
+        counter[i] = (unsigned char) (timestep & 0xFFU);
+        timestep >>= 8;
+    }
+
+    md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA1);
+    if (!md_info ||
+            mbedtls_md_hmac(md_info, secret, secret_len, counter, sizeof(counter), hmac) != 0) {
+        return false;
+    }
+
+    offset = hmac[19] & 0x0FU;
+    binary = ((uint32_t) (hmac[offset] & 0x7F) << 24) |
+            ((uint32_t) hmac[offset + 1] << 16) |
+            ((uint32_t) hmac[offset + 2] << 8) |
+            (uint32_t) hmac[offset + 3];
+    otp = binary % 1000000U;
+
+    snprintf(out, out_size, "%06" PRIu32, otp);
+    out[out_size - 1] = '\0';
+    return true;
+}
+
+static void dashboard_update_right_otp_cache(time_t now, bool time_synced)
+{
+    char next_text[sizeof(s_state.right_otp_text)];
+    int next_remaining = TOTP_PERIOD_SEC;
+
+    if (!time_synced) {
+        strncpy(next_text, "NO TIME", sizeof(next_text));
+        next_text[sizeof(next_text) - 1] = '\0';
+        next_remaining = 0;
+    } else if (!dashboard_totp_generate(now, next_text, sizeof(next_text), &next_remaining)) {
+        strncpy(next_text, "NO KEY", sizeof(next_text));
+        next_text[sizeof(next_text) - 1] = '\0';
+        next_remaining = 0;
+    }
+
+    if (strcmp(next_text, s_state.right_otp_text) != 0 ||
+            next_remaining != s_state.right_otp_remaining) {
+        strcpy(s_state.right_otp_text, next_text);
+        s_state.right_otp_remaining = next_remaining;
+        s_state.right_dirty = true;
+    }
 }
 
 static bool dashboard_json_extract_number(const char *json, const char *key,
@@ -1568,6 +1741,51 @@ static bool dashboard_json_extract_number(const char *json, const char *key,
 
     out[pos] = '\0';
     return saw_digit;
+}
+
+static bool dashboard_json_extract_string(const char *json, const char *key,
+        char *out, size_t out_size)
+{
+    const char *cursor;
+    size_t pos = 0;
+
+    if (!json || !key || !out || out_size == 0) {
+        return false;
+    }
+
+    cursor = strstr(json, key);
+    if (!cursor) {
+        return false;
+    }
+
+    cursor = strchr(cursor, ':');
+    if (!cursor) {
+        return false;
+    }
+    cursor++;
+
+    while (*cursor == ' ' || *cursor == '\t') {
+        cursor++;
+    }
+    if (*cursor != '"') {
+        return false;
+    }
+    cursor++;
+
+    while (*cursor && *cursor != '"' && pos + 1 < out_size) {
+        char ch = *cursor++;
+
+        if (ch == '\\' && *cursor) {
+            ch = *cursor++;
+        }
+        if ((unsigned char) ch < 32) {
+            continue;
+        }
+        out[pos++] = ch;
+    }
+
+    out[pos] = '\0';
+    return pos > 0;
 }
 
 static bool dashboard_codepoint_renderable(uint16_t codepoint)
@@ -1889,22 +2107,9 @@ static esp_err_t dashboard_http_get_text(const char *url, int timeout_ms,
     return ESP_OK;
 }
 
-static esp_err_t dashboard_fetch_weather_open_meteo(char *out, size_t out_size)
+static esp_err_t dashboard_fetch_weather_open_meteo_at(const char *latitude,
+        const char *longitude, char *out, size_t out_size)
 {
-    typedef struct {
-        const char *name;
-        const char *latitude;
-        const char *longitude;
-    } weather_city_t;
-
-    static const weather_city_t s_weather_cities[] = {
-        { "shanghai", "31.23", "121.47" },
-        { "beijing", "39.90", "116.40" },
-        { "shenzhen", "22.54", "114.06" },
-        { "guangzhou", "23.13", "113.27" },
-    };
-
-    const weather_city_t *city = &s_weather_cities[0];
     const char *current_section;
     char url[192];
     char response[384];
@@ -1912,18 +2117,10 @@ static esp_err_t dashboard_fetch_weather_open_meteo(char *out, size_t out_size)
     char code_text[16];
     int weather_code;
 
-    for (size_t i = 0; i < sizeof(s_weather_cities) / sizeof(s_weather_cities[0]); i++) {
-        if (dashboard_ascii_strcasecmp(CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION,
-                s_weather_cities[i].name) == 0) {
-            city = &s_weather_cities[i];
-            break;
-        }
-    }
-
     snprintf(url, sizeof(url),
             "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
             "&current=temperature_2m,weather_code&timezone=Asia%%2FShanghai",
-            city->latitude, city->longitude);
+            latitude, longitude);
 
     if (dashboard_http_get_text(url, 6000, response, sizeof(response)) != ESP_OK) {
         return ESP_FAIL;
@@ -1948,18 +2145,52 @@ static esp_err_t dashboard_fetch_weather_open_meteo(char *out, size_t out_size)
     return ESP_OK;
 }
 
-static esp_err_t dashboard_fetch_weather(char *out, size_t out_size)
+static esp_err_t dashboard_fetch_weather_open_meteo(char *out, size_t out_size)
+{
+    const weather_city_t *city = dashboard_select_weather_city();
+
+    return dashboard_fetch_weather_open_meteo_at(city->latitude, city->longitude, out, out_size);
+}
+
+static esp_err_t dashboard_fetch_weather_location_ipwhois(char *location_out,
+        size_t location_out_size, char *latitude_out, size_t latitude_out_size,
+        char *longitude_out, size_t longitude_out_size)
+{
+    char response[1024];
+    char city[32];
+
+    if (!location_out || location_out_size == 0 ||
+            !latitude_out || latitude_out_size == 0 ||
+            !longitude_out || longitude_out_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (dashboard_http_get_text("https://ipwho.is/", 5000, response, sizeof(response)) != ESP_OK) {
+        return ESP_FAIL;
+    }
+    if (!strstr(response, "\"success\": true") && !strstr(response, "\"success\":true")) {
+        return ESP_FAIL;
+    }
+    if (!dashboard_json_extract_string(response, "\"city\"", city, sizeof(city)) ||
+            !dashboard_json_extract_number(response, "\"latitude\"",
+                    latitude_out, latitude_out_size) ||
+            !dashboard_json_extract_number(response, "\"longitude\"",
+                    longitude_out, longitude_out_size)) {
+        return ESP_FAIL;
+    }
+
+    dashboard_normalize_location_label(location_out, location_out_size, city, "LOCAL");
+    return ESP_OK;
+}
+
+static esp_err_t dashboard_fetch_weather_wttr_text(const char *location,
+        char *out, size_t out_size)
 {
     char url[160];
 
-    if (dashboard_fetch_weather_open_meteo(out, out_size) == ESP_OK) {
-        return ESP_OK;
-    }
-
-    if (CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION[0] != '\0') {
+    if (location && location[0] != '\0') {
         snprintf(url, sizeof(url),
                 "https://wttr.in/%s?format=%%25t%%20%%25C",
-                CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION);
+                location);
     } else {
         strncpy(url, "https://wttr.in/?format=%25t%20%25C", sizeof(url));
         url[sizeof(url) - 1] = '\0';
@@ -1973,10 +2204,10 @@ static esp_err_t dashboard_fetch_weather(char *out, size_t out_size)
         }
     }
 
-    if (CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION[0] != '\0') {
+    if (location && location[0] != '\0') {
         snprintf(url, sizeof(url),
                 "https://w.r2049.cn/en-wttr?location=%s",
-                CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION);
+                location);
     } else {
         strncpy(url, "https://w.r2049.cn/en-wttr", sizeof(url));
         url[sizeof(url) - 1] = '\0';
@@ -1995,8 +2226,48 @@ static esp_err_t dashboard_fetch_weather(char *out, size_t out_size)
         }
     }
 
-    strncpy(out, "WEATHER --", out_size);
-    out[out_size - 1] = '\0';
+    return ESP_FAIL;
+}
+
+static esp_err_t dashboard_fetch_weather(char *location_out, size_t location_out_size,
+        char *weather_out, size_t weather_out_size)
+{
+    char latitude[24];
+    char longitude[24];
+
+    if (!location_out || location_out_size == 0 || !weather_out || weather_out_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION[0] != '\0') {
+        dashboard_build_location_label(location_out, location_out_size);
+
+        if (dashboard_fetch_weather_open_meteo(weather_out, weather_out_size) == ESP_OK) {
+            return ESP_OK;
+        }
+        if (dashboard_fetch_weather_wttr_text(CONFIG_HOMEKIT_DASHBOARD_WEATHER_LOCATION,
+                weather_out, weather_out_size) == ESP_OK) {
+            return ESP_OK;
+        }
+    } else {
+        if (dashboard_fetch_weather_location_ipwhois(location_out, location_out_size,
+                latitude, sizeof(latitude), longitude, sizeof(longitude)) == ESP_OK &&
+                dashboard_fetch_weather_open_meteo_at(latitude, longitude,
+                        weather_out, weather_out_size) == ESP_OK) {
+            return ESP_OK;
+        }
+
+        dashboard_build_location_label(location_out, location_out_size);
+        if (dashboard_fetch_weather_wttr_text(NULL, weather_out, weather_out_size) == ESP_OK) {
+            return ESP_OK;
+        }
+        if (dashboard_fetch_weather_open_meteo(weather_out, weather_out_size) == ESP_OK) {
+            return ESP_OK;
+        }
+    }
+
+    strncpy(weather_out, "WEATHER --", weather_out_size);
+    weather_out[weather_out_size - 1] = '\0';
     return ESP_OK;
 }
 
@@ -2105,13 +2376,11 @@ static int dashboard_left_poem_y(void)
 }
 
 static void dashboard_format_left_detail(char *out, size_t out_size,
-        const char *weather_text, bool wifi_connected)
+        const char *location_text, const char *weather_text, bool wifi_connected)
 {
-    char location[24];
     char summary[sizeof(s_state.weather_text)];
     size_t line_limit = dashboard_left_line_char_limit(LEFT_DETAIL_SCALE);
-
-    dashboard_build_location_label(location, sizeof(location));
+    const char *location = (location_text && location_text[0] != '\0') ? location_text : "LOCATING";
 
     if (!wifi_connected) {
         strncpy(summary, "OFFLINE", sizeof(summary));
@@ -2145,7 +2414,7 @@ static void dashboard_redraw_left_frame(void)
 static void dashboard_redraw_left_time_full(const char *time_text)
 {
     dashboard_draw_text_line(&s_left_panel, dashboard_left_time_y(), time_text,
-            s_left_text, s_left_header, LEFT_TIME_SCALE, true);
+            s_left_text, s_left_header, LEFT_TIME_SCALE, false);
     strcpy(s_left_rendered_time, time_text);
 }
 
@@ -2153,15 +2422,17 @@ static void dashboard_refresh_left_time(const char *time_text)
 {
     dashboard_refresh_text_cells(&s_left_panel, dashboard_left_time_y(),
             s_left_rendered_time, time_text,
-            s_left_text, s_left_header, LEFT_TIME_SCALE, true);
+            s_left_text, s_left_header, LEFT_TIME_SCALE, false);
     strcpy(s_left_rendered_time, time_text);
 }
 
-static void dashboard_redraw_left_detail(const char *weather_text, bool wifi_connected)
+static void dashboard_redraw_left_detail(const char *location_text,
+        const char *weather_text, bool wifi_connected)
 {
     char detail_text[LEFT_DETAIL_TEXT_LEN];
 
-    dashboard_format_left_detail(detail_text, sizeof(detail_text), weather_text, wifi_connected);
+    dashboard_format_left_detail(detail_text, sizeof(detail_text),
+            location_text, weather_text, wifi_connected);
     dashboard_draw_text_line(&s_left_panel, dashboard_left_detail_y(), detail_text,
             wifi_connected ? s_left_detail_text : s_left_secondary,
             s_left_background, LEFT_DETAIL_SCALE, false);
@@ -2176,93 +2447,57 @@ static void dashboard_redraw_left_poem(const char *poem_text)
             s_left_poem_text, s_left_poem_background);
 }
 
-static void dashboard_redraw_left(const char *time_text, const char *weather_text,
-        const char *poem_text, bool wifi_connected)
+static void dashboard_redraw_left(const char *time_text, const char *location_text,
+        const char *weather_text, const char *poem_text, bool wifi_connected)
 {
     dashboard_redraw_left_frame();
     dashboard_redraw_left_time_full(time_text);
-    dashboard_redraw_left_detail(weather_text, wifi_connected);
+    dashboard_redraw_left_detail(location_text, weather_text, wifi_connected);
     dashboard_redraw_left_poem(poem_text);
 }
 
-static void dashboard_redraw_right(const char *ip_text, const bool button_states[3])
+static void dashboard_redraw_right(const char *otp_text, int otp_remaining,
+        const bool button_states[3])
 {
     int panel_width = dashboard_panel_visible_width(&s_right_panel);
     int panel_height = dashboard_panel_visible_height(&s_right_panel);
-    int landscape_badge_top;
-    int landscape_badge_height;
+    int row_gap = panel_width > panel_height ? 4 : 6;
+    int row_height = (panel_height - row_gap * 4) / 3;
+    int row1_y = row_gap;
+    int row2_y = row1_y + row_height + row_gap;
+    int row3_y = row2_y + row_height + row_gap;
+    char row1_text[24];
 
-    if (panel_width > panel_height) {
-        int header_height = FONT_HEIGHT * RIGHT_TITLE_SCALE + 10;
-        int ip_y = header_height + 3;
-        int badge_gap = 6;
-        int badge_width = (panel_width - badge_gap * 4) / 3;
-
-        landscape_badge_top = ip_y + FONT_HEIGHT + 6;
-        landscape_badge_height = panel_height - landscape_badge_top - 6;
-        if (landscape_badge_height < FONT_HEIGHT + 8) {
-            landscape_badge_top = header_height + 4;
-            landscape_badge_height = panel_height - landscape_badge_top - 4;
-        }
-
-        dashboard_panel_fill_rect(&s_right_panel, 0, 0, panel_width, panel_height, s_right_background);
-        dashboard_panel_fill_rect(&s_right_panel, 0, 0, panel_width, header_height, s_right_header);
-        dashboard_draw_text_line(&s_right_panel, 4, "STATUS",
-                s_right_text, s_right_header, RIGHT_TITLE_SCALE, true);
-        dashboard_draw_text_line(&s_right_panel, ip_y, ip_text,
-                s_right_text, s_right_background, 1, false);
-
-        for (size_t i = 0; i < 3; i++) {
-            char row_text[16];
-            int badge_x = badge_gap + (int) i * (badge_width + badge_gap);
-            uint16_t row_color = button_states[i] ? s_right_on : s_right_off;
-
-            dashboard_panel_fill_rect(&s_right_panel, badge_x, landscape_badge_top,
-                    badge_width, landscape_badge_height, row_color);
-            dashboard_format_button_status(row_text, sizeof(row_text), i, button_states[i]);
-            dashboard_draw_text_line(&s_right_panel,
-                    landscape_badge_top + ((landscape_badge_height - FONT_HEIGHT) / 2),
-                    row_text, s_right_text, row_color, 1, true);
-        }
-        return;
+    if (row_height < FONT_HEIGHT + 6) {
+        row_height = FONT_HEIGHT + 6;
     }
-
-    int header_height = FONT_HEIGHT * RIGHT_TITLE_SCALE + 16;
-    int ip_y = header_height + 14;
-    int row_height = 42;
-    int row_y = ip_y + FONT_HEIGHT * RIGHT_BODY_SCALE + 18;
 
     dashboard_panel_fill_rect(&s_right_panel, 0, 0, panel_width, panel_height, s_right_background);
-    dashboard_panel_fill_rect(&s_right_panel, 0, 0, panel_width, header_height, s_right_header);
-    dashboard_draw_text_line(&s_right_panel, 6, "STATUS",
-            s_right_text, s_right_header, RIGHT_TITLE_SCALE, true);
-    dashboard_draw_text_line(&s_right_panel, ip_y, ip_text,
-            s_right_text, s_right_background, 1, false);
+    dashboard_panel_fill_rect(&s_right_panel, 6, row1_y, panel_width - 12, row_height, s_right_header);
+    dashboard_panel_fill_rect(&s_right_panel, 6, row2_y, panel_width - 12, row_height,
+            button_states[1] ? s_right_on : s_right_off);
+    dashboard_panel_fill_rect(&s_right_panel, 6, row3_y, panel_width - 12, row_height,
+            button_states[2] ? s_right_on : s_right_off);
 
-    for (size_t i = 0; i < 3; i++) {
-        char row_text[16];
-        uint16_t row_color = button_states[i] ? s_right_on : s_right_off;
-
-        dashboard_panel_fill_rect(&s_right_panel, 6, row_y + (int) i * row_height,
-                panel_width - 12, row_height - 6, row_color);
-        dashboard_format_button_status(row_text, sizeof(row_text), i, button_states[i]);
-        dashboard_draw_text_line(&s_right_panel,
-                row_y + 10 + (int) i * row_height,
-                row_text, s_right_text, row_color, 1, true);
-        if (i < 2) {
-            dashboard_panel_fill_rect(&s_right_panel, 10,
-                    row_y + (int) (i + 1) * row_height - 3,
-                    panel_width - 20, 2, s_right_divider);
-        }
+    if (otp_remaining > 0) {
+        snprintf(row1_text, sizeof(row1_text), "%s %02dS", otp_text, otp_remaining);
+    } else {
+        snprintf(row1_text, sizeof(row1_text), "%s", otp_text);
     }
+    row1_text[sizeof(row1_text) - 1] = '\0';
+    dashboard_draw_text_line(&s_right_panel,
+            row1_y + ((row_height - FONT_HEIGHT * RIGHT_BODY_SCALE) / 2),
+            row1_text, s_right_text, s_right_header,
+            panel_width > 120 ? RIGHT_BODY_SCALE : 1, true);
 }
 
 static void dashboard_render_if_needed(void)
 {
     char time_text[sizeof(s_state.last_time_text)];
+    char location_text[sizeof(s_state.location_text)];
     char weather_text[sizeof(s_state.weather_text)];
     char poem_text[sizeof(s_state.poem_text)];
-    char ip_text[sizeof(s_state.ip_text)];
+    char otp_text[sizeof(s_state.right_otp_text)];
     bool left_dirty;
     bool left_time_dirty;
     bool left_detail_dirty;
@@ -2270,6 +2505,7 @@ static void dashboard_render_if_needed(void)
     bool right_dirty;
     bool wifi_connected;
     bool buttons[3];
+    int otp_remaining;
 
     xSemaphoreTake(s_state.lock, portMAX_DELAY);
     left_dirty = s_state.left_dirty;
@@ -2278,11 +2514,13 @@ static void dashboard_render_if_needed(void)
     left_poem_dirty = s_state.left_poem_dirty;
     right_dirty = s_state.right_dirty;
     strcpy(time_text, s_state.last_time_text);
+    strcpy(location_text, s_state.location_text);
     strcpy(weather_text, s_state.weather_text);
     strcpy(poem_text, s_state.poem_text);
-    strcpy(ip_text, s_state.ip_text);
+    strcpy(otp_text, s_state.right_otp_text);
     wifi_connected = s_state.wifi_connected;
     memcpy(buttons, s_state.button_states, sizeof(buttons));
+    otp_remaining = s_state.right_otp_remaining;
     s_state.left_dirty = false;
     s_state.left_time_dirty = false;
     s_state.left_detail_dirty = false;
@@ -2291,20 +2529,20 @@ static void dashboard_render_if_needed(void)
     xSemaphoreGive(s_state.lock);
 
     if (left_dirty && s_state.left_available) {
-        dashboard_redraw_left(time_text, weather_text, poem_text, wifi_connected);
+        dashboard_redraw_left(time_text, location_text, weather_text, poem_text, wifi_connected);
     } else if (s_state.left_available) {
         if (left_time_dirty) {
             dashboard_refresh_left_time(time_text);
         }
         if (left_detail_dirty) {
-            dashboard_redraw_left_detail(weather_text, wifi_connected);
+            dashboard_redraw_left_detail(location_text, weather_text, wifi_connected);
         }
         if (left_poem_dirty) {
             dashboard_redraw_left_poem(poem_text);
         }
     }
     if (right_dirty && s_state.right_available) {
-        dashboard_redraw_right(ip_text, buttons);
+        dashboard_redraw_right(otp_text, otp_remaining, buttons);
     }
 }
 
@@ -2312,6 +2550,7 @@ static void dashboard_maybe_refresh_weather(void)
 {
     TickType_t now_ticks = xTaskGetTickCount();
     bool should_fetch = false;
+    char location_text[sizeof(s_state.location_text)];
     char weather_text[sizeof(s_state.weather_text)];
 
     xSemaphoreTake(s_state.lock, portMAX_DELAY);
@@ -2328,9 +2567,14 @@ static void dashboard_maybe_refresh_weather(void)
         return;
     }
 
-    if (dashboard_fetch_weather(weather_text, sizeof(weather_text)) == ESP_OK) {
+    if (dashboard_fetch_weather(location_text, sizeof(location_text),
+            weather_text, sizeof(weather_text)) == ESP_OK) {
         xSemaphoreTake(s_state.lock, portMAX_DELAY);
         s_state.last_weather_fetch_tick = now_ticks;
+        if (strcmp(location_text, s_state.location_text) != 0) {
+            strcpy(s_state.location_text, location_text);
+            s_state.left_detail_dirty = true;
+        }
         if (strcmp(weather_text, s_state.weather_text) != 0) {
             strcpy(s_state.weather_text, weather_text);
             s_state.left_detail_dirty = true;
@@ -2464,6 +2708,7 @@ void dual_panel_display_init(void)
     tzset();
     s_state.fallback_time_seed = dashboard_build_time_seed();
     s_state.fallback_time_tick = xTaskGetTickCount();
+    dashboard_build_location_label(s_state.location_text, sizeof(s_state.location_text));
 
     max_width = CONFIG_HOMEKIT_DASHBOARD_LEFT_H_RES;
     if ((size_t) CONFIG_HOMEKIT_DASHBOARD_LEFT_V_RES > max_width) {
@@ -2604,6 +2849,17 @@ void dual_panel_display_set_button(size_t index, bool is_pressed)
         s_state.button_states[index] = is_pressed;
         s_state.right_dirty = true;
     }
+    xSemaphoreGive(s_state.lock);
+}
+
+void dual_panel_display_request_right_refresh(void)
+{
+    if (!s_state.lock) {
+        return;
+    }
+
+    xSemaphoreTake(s_state.lock, portMAX_DELAY);
+    s_state.right_dirty = true;
     xSemaphoreGive(s_state.lock);
 }
 
