@@ -175,13 +175,13 @@ menu "Example Configuration"
 
         config HOMEKIT_DASHBOARD_SPI_SCLK
             int "Dashboard shared SPI clock GPIO"
-            default 6
+            default 2
             help
                 Shared SPI SCLK for both strip displays.
 
         config HOMEKIT_DASHBOARD_SPI_MOSI
             int "Dashboard shared SPI MOSI GPIO"
-            default 7
+            default 3
             help
                 Shared SPI MOSI/SDA for both strip displays.
 
@@ -189,7 +189,9 @@ menu "Example Configuration"
             int "Dashboard SPI clock (Hz)"
             default 10000000
             help
-                Shared SPI pixel clock used by both panels.
+                Shared SPI pixel clock used by panels on the hardware SPI bus.
+                Right-side panels that use dedicated software SPI pins ignore
+                this value.
                 10 MHz is a safe default for most ST7789 and NV3007 strips;
                 raise to 20000000 only if your panel supports it.
 
@@ -197,15 +199,29 @@ menu "Example Configuration"
 
             config HOMEKIT_DASHBOARD_LEFT_CS
                 int "Left ST7789 CS GPIO"
-                default 10
+                default 7
 
             config HOMEKIT_DASHBOARD_LEFT_DC
                 int "Left ST7789 DC GPIO"
-                default 11
+                default 6
+
+            config HOMEKIT_DASHBOARD_LEFT_SCLK
+                int "Left panel dedicated SCLK GPIO (-1 = share dashboard SPI bus)"
+                default 2
+                help
+                    Set to a valid GPIO to use an independent software-SPI clock
+                    for the left panel. Leave at -1 to share the dashboard SPI bus.
+
+            config HOMEKIT_DASHBOARD_LEFT_MOSI
+                int "Left panel dedicated MOSI GPIO (-1 = share dashboard SPI bus)"
+                default 3
+                help
+                    Set to a valid GPIO to use an independent software-SPI data
+                    pin for the left panel. Leave at -1 to share the dashboard SPI bus.
 
             config HOMEKIT_DASHBOARD_LEFT_RST
                 int "Left ST7789 reset GPIO"
-                default 12
+                default 10
 
             config HOMEKIT_DASHBOARD_LEFT_BL
                 int "Left ST7789 backlight GPIO"
@@ -225,15 +241,15 @@ menu "Example Configuration"
 
             config HOMEKIT_DASHBOARD_LEFT_X_OFFSET
                 int "Left ST7789 X offset"
-                default 0
+                default 18
 
             config HOMEKIT_DASHBOARD_LEFT_Y_OFFSET
                 int "Left ST7789 Y offset"
-                default 0
+                default 82
 
             config HOMEKIT_DASHBOARD_LEFT_SWAP_XY
                 bool "Left ST7789 swap X/Y"
-                default n
+                default y
 
             config HOMEKIT_DASHBOARD_LEFT_MIRROR_X
                 bool "Left ST7789 mirror X"
@@ -241,11 +257,11 @@ menu "Example Configuration"
 
             config HOMEKIT_DASHBOARD_LEFT_MIRROR_Y
                 bool "Left ST7789 mirror Y"
-                default n
+                default y
 
             config HOMEKIT_DASHBOARD_LEFT_INVERT_COLORS
                 bool "Left ST7789 invert colors"
-                default y
+                default n
 
             config HOMEKIT_DASHBOARD_LEFT_BGR_ORDER
                 bool "Left ST7789 use BGR order"
@@ -253,76 +269,102 @@ menu "Example Configuration"
 
         endmenu
 
-        menu "Right NV3007 Strip"
+        choice HOMEKIT_DASHBOARD_RIGHT_PANEL_TYPE
+            prompt "Right panel controller"
+            default HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
+            help
+                Select the controller family used by the right-side dashboard panel.
+
+            config HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
+                bool "ST7789/ST7899-compatible"
+
+            config HOMEKIT_DASHBOARD_RIGHT_PANEL_NV3007
+                bool "NV3007"
+
+        endchoice
+
+        menu "Right Display Strip"
 
             config HOMEKIT_DASHBOARD_RIGHT_CS
-                int "Right NV3007 CS GPIO"
+                int "Right panel CS GPIO"
+                default 19 if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default 13
 
             config HOMEKIT_DASHBOARD_RIGHT_DC
-                int "Right NV3007 DC GPIO"
+                int "Right panel DC GPIO"
+                default 18 if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default 14
 
             config HOMEKIT_DASHBOARD_RIGHT_SCLK
-                int "Right NV3007 dedicated SCLK GPIO (-1 = share ST7789's SPI bus)"
+                int "Right panel dedicated SCLK GPIO (-1 = share dashboard SPI bus)"
+                default 0 if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default -1
                 help
                     Set to a valid GPIO to use an independent software-SPI clock
-                    for the NV3007. Leave at -1 to share the shared SPI2 SCLK.
+                    for the right panel. Leave at -1 to share the dashboard SPI bus.
 
             config HOMEKIT_DASHBOARD_RIGHT_MOSI
-                int "Right NV3007 dedicated MOSI GPIO (-1 = share ST7789's SPI bus)"
+                int "Right panel dedicated MOSI GPIO (-1 = share dashboard SPI bus)"
+                default 1 if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default -1
                 help
                     Set to a valid GPIO to use an independent software-SPI data
-                    pin for the NV3007. Leave at -1 to share the shared SPI2 MOSI.
+                    pin for the right panel. Leave at -1 to share the dashboard SPI bus.
 
             config HOMEKIT_DASHBOARD_RIGHT_RST
-                int "Right NV3007 reset GPIO"
+                int "Right panel reset GPIO"
+                default 12 if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default 15
 
             config HOMEKIT_DASHBOARD_RIGHT_BL
-                int "Right NV3007 backlight GPIO"
+                int "Right panel backlight GPIO"
                 default -1
 
             config HOMEKIT_DASHBOARD_RIGHT_BL_ACTIVE_HIGH
-                bool "Right NV3007 backlight active high"
+                bool "Right panel backlight active high"
                 default y
 
             config HOMEKIT_DASHBOARD_RIGHT_H_RES
-                int "Right NV3007 width"
+                int "Right panel width"
+                default 76 if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default 142
 
             config HOMEKIT_DASHBOARD_RIGHT_V_RES
-                int "Right NV3007 height"
+                int "Right panel height"
+                default 284 if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default 428
 
             config HOMEKIT_DASHBOARD_RIGHT_X_OFFSET
-                int "Right NV3007 X offset"
+                int "Right panel X offset"
+                default 18 if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default 0
 
             config HOMEKIT_DASHBOARD_RIGHT_Y_OFFSET
-                int "Right NV3007 Y offset"
+                int "Right panel Y offset"
+                default 82 if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default 0
 
             config HOMEKIT_DASHBOARD_RIGHT_SWAP_XY
-                bool "Right NV3007 swap X/Y"
+                bool "Right panel swap X/Y"
+                default y if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default n
 
             config HOMEKIT_DASHBOARD_RIGHT_MIRROR_X
-                bool "Right NV3007 mirror X"
+                bool "Right panel mirror X"
+                default y if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default n
 
             config HOMEKIT_DASHBOARD_RIGHT_MIRROR_Y
-                bool "Right NV3007 mirror Y"
+                bool "Right panel mirror Y"
                 default n
 
             config HOMEKIT_DASHBOARD_RIGHT_INVERT_COLORS
-                bool "Right NV3007 invert colors"
+                bool "Right panel invert colors"
+                default n if HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
                 default n
 
             config HOMEKIT_DASHBOARD_RIGHT_BGR_ORDER
-                bool "Right NV3007 use BGR order"
+                bool "Right panel use BGR order"
                 default y
 
         endmenu

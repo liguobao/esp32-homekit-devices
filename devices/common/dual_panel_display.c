@@ -24,6 +24,7 @@
 #include "esp_lcd_panel_vendor.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_rom_sys.h"
 #include "esp_sntp.h"
 #include "esp_wifi.h"
 
@@ -116,6 +117,7 @@ static const char *TAG = "dual_panel";
 #define POEM_REFRESH_SEC (5 * 60)
 #define PANEL_CMD_DELAY 0xFE
 #define PANEL_CMD_END 0x00
+#define ST7789_CMD_RAMCTRL 0xB0
 
 #define RGB565(r, g, b) \
     (uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | (((b) & 0xF8) >> 3))
@@ -135,6 +137,12 @@ typedef enum {
     PANEL_CONTROLLER_NV3007,
 } panel_controller_t;
 
+#ifdef CONFIG_HOMEKIT_DASHBOARD_RIGHT_PANEL_ST7789
+#define DASH_CFG_RIGHT_CONTROLLER PANEL_CONTROLLER_ST7789
+#else
+#define DASH_CFG_RIGHT_CONTROLLER PANEL_CONTROLLER_NV3007
+#endif
+
 typedef struct {
     panel_controller_t controller;
     esp_lcd_panel_io_handle_t io_handle;
@@ -148,12 +156,14 @@ typedef struct {
     bool mirror_y;
     bool invert_colors;
     bool bgr_order;
-    /* Independent soft-SPI pins for NV3007 (set when own_sclk/own_mosi >= 0) */
+    /* Independent soft-SPI pins for panel variants that do not share the hardware bus. */
     bool soft_spi;
     int soft_spi_clk;
     int soft_spi_mosi;
     int soft_spi_cs;
     int soft_spi_dc;
+    int soft_spi_delay_us;
+    bool soft_spi_keep_cs_low;
 } dashboard_panel_t;
 
 typedef struct {
@@ -373,6 +383,15 @@ static const uint16_t s_right_text = RGB565(245, 247, 250);
 static const uint16_t s_right_on = RGB565(35, 110, 48);
 static const uint16_t s_right_off = RGB565(122, 32, 40);
 static const uint16_t s_right_divider = RGB565(64, 74, 88);
+static const uint8_t s_st7789_ramctrl[2] = { 0x00, 0xE0 };
+static const uint8_t s_st7789_positive_gamma[] = {
+    0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x32,
+    0x44, 0x42, 0x06, 0x0E, 0x12, 0x14, 0x17,
+};
+static const uint8_t s_st7789_negative_gamma[] = {
+    0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x31,
+    0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E,
+};
 
 static char dashboard_normalize_char(char c)
 {
@@ -464,7 +483,13 @@ static void dashboard_soft_spi_write_byte(const dashboard_panel_t *panel, uint8_
     for (int bit = 7; bit >= 0; bit--) {
         gpio_set_level(panel->soft_spi_mosi, (byte >> bit) & 1);
         gpio_set_level(panel->soft_spi_clk, 1);
+        if (panel->soft_spi_delay_us > 0) {
+            esp_rom_delay_us((uint32_t) panel->soft_spi_delay_us);
+        }
         gpio_set_level(panel->soft_spi_clk, 0);
+        if (panel->soft_spi_delay_us > 0) {
+            esp_rom_delay_us((uint32_t) panel->soft_spi_delay_us);
+        }
     }
 }
 
@@ -473,7 +498,9 @@ static esp_err_t dashboard_panel_tx_param(dashboard_panel_t *panel,
         uint8_t cmd, const void *data, size_t len)
 {
     if (panel->soft_spi) {
-        gpio_set_level(panel->soft_spi_cs, 0);
+        if (panel->soft_spi_cs >= 0) {
+            gpio_set_level(panel->soft_spi_cs, 0);
+        }
         gpio_set_level(panel->soft_spi_dc, 0);   /* command phase */
         dashboard_soft_spi_write_byte(panel, cmd);
         if (data && len > 0) {
@@ -483,7 +510,9 @@ static esp_err_t dashboard_panel_tx_param(dashboard_panel_t *panel,
                 dashboard_soft_spi_write_byte(panel, p[i]);
             }
         }
-        gpio_set_level(panel->soft_spi_cs, 1);
+        if (!panel->soft_spi_keep_cs_low && panel->soft_spi_cs >= 0) {
+            gpio_set_level(panel->soft_spi_cs, 1);
+        }
         return ESP_OK;
     }
     return esp_lcd_panel_io_tx_param(panel->io_handle, (int) cmd, data, len);
@@ -494,7 +523,9 @@ static esp_err_t dashboard_panel_tx_color(dashboard_panel_t *panel,
         uint8_t cmd, const void *color_data, size_t len)
 {
     if (panel->soft_spi) {
-        gpio_set_level(panel->soft_spi_cs, 0);
+        if (panel->soft_spi_cs >= 0) {
+            gpio_set_level(panel->soft_spi_cs, 0);
+        }
         gpio_set_level(panel->soft_spi_dc, 0);   /* command phase */
         dashboard_soft_spi_write_byte(panel, cmd);
         if (color_data && len > 0) {
@@ -507,7 +538,9 @@ static esp_err_t dashboard_panel_tx_color(dashboard_panel_t *panel,
                 dashboard_soft_spi_write_byte(panel, (uint8_t) (pixels[i] & 0xFF));
             }
         }
-        gpio_set_level(panel->soft_spi_cs, 1);
+        if (!panel->soft_spi_keep_cs_low && panel->soft_spi_cs >= 0) {
+            gpio_set_level(panel->soft_spi_cs, 1);
+        }
         return ESP_OK;
     }
     return esp_lcd_panel_io_tx_color(panel->io_handle, (int) cmd, color_data, len);
@@ -537,7 +570,7 @@ static esp_err_t dashboard_panel_send_sequence(dashboard_panel_t *panel,
     return ESP_OK;
 }
 
-static esp_err_t dashboard_nv3007_apply_madctl(dashboard_panel_t *panel)
+static esp_err_t dashboard_st77xx_apply_madctl(dashboard_panel_t *panel)
 {
     uint8_t madctl = panel->bgr_order ? 0x08 : 0x00;
 
@@ -553,6 +586,32 @@ static esp_err_t dashboard_nv3007_apply_madctl(dashboard_panel_t *panel)
     return dashboard_panel_tx_param(panel, 0x36, &madctl, 1);
 }
 
+static esp_err_t dashboard_panel_reset_gpio(int reset_gpio, const char *panel_name)
+{
+    gpio_config_t reset_pin;
+
+    if (reset_gpio < 0) {
+        return ESP_OK;
+    }
+
+    memset(&reset_pin, 0, sizeof(reset_pin));
+    reset_pin.pin_bit_mask = 1ULL << reset_gpio;
+    reset_pin.mode = GPIO_MODE_OUTPUT;
+    reset_pin.pull_up_en = GPIO_PULLUP_DISABLE;
+    reset_pin.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    reset_pin.intr_type = GPIO_INTR_DISABLE;
+
+    ESP_RETURN_ON_ERROR(gpio_config(&reset_pin), TAG, "%s reset gpio config failed",
+            panel_name);
+    ESP_RETURN_ON_ERROR(gpio_set_level(reset_gpio, 0), TAG, "%s reset low failed",
+            panel_name);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_RETURN_ON_ERROR(gpio_set_level(reset_gpio, 1), TAG, "%s reset high failed",
+            panel_name);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    return ESP_OK;
+}
+
 static esp_err_t dashboard_panel_init_nv3007(dashboard_panel_t *panel, int reset_gpio)
 {
     esp_err_t err;
@@ -560,21 +619,8 @@ static esp_err_t dashboard_panel_init_nv3007(dashboard_panel_t *panel, int reset
     uint8_t lock = 0x00;
     uint8_t pixel_format = 0x05;
 
-    if (reset_gpio >= 0) {
-        gpio_config_t reset_pin = {
-            .pin_bit_mask = 1ULL << reset_gpio,
-            .mode = GPIO_MODE_OUTPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-
-        ESP_RETURN_ON_ERROR(gpio_config(&reset_pin), TAG, "NV3007 reset gpio config failed");
-        ESP_RETURN_ON_ERROR(gpio_set_level(reset_gpio, 0), TAG, "NV3007 reset low failed");
-        vTaskDelay(pdMS_TO_TICKS(10));
-        ESP_RETURN_ON_ERROR(gpio_set_level(reset_gpio, 1), TAG, "NV3007 reset high failed");
-        vTaskDelay(pdMS_TO_TICKS(120));
-    }
+    ESP_RETURN_ON_ERROR(dashboard_panel_reset_gpio(reset_gpio, "NV3007"), TAG,
+            "NV3007 reset failed");
 
     ESP_RETURN_ON_ERROR(dashboard_panel_tx_param(panel, 0xFF, &unlock, 1),
             TAG, "NV3007 unlock failed");
@@ -589,7 +635,7 @@ static esp_err_t dashboard_panel_init_nv3007(dashboard_panel_t *panel, int reset
     }
     if (err == ESP_OK) {
         vTaskDelay(pdMS_TO_TICKS(22));
-        err = dashboard_nv3007_apply_madctl(panel);
+        err = dashboard_st77xx_apply_madctl(panel);
     }
     if (err == ESP_OK) {
         uint8_t inv_cmd = panel->invert_colors ? 0x21 : 0x20;
@@ -606,41 +652,87 @@ static esp_err_t dashboard_panel_init_nv3007(dashboard_panel_t *panel, int reset
 
 static esp_err_t dashboard_panel_init_st7789(dashboard_panel_t *panel, int reset_gpio)
 {
-    esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = reset_gpio,
-        .rgb_ele_order = panel->bgr_order ?
-                LCD_RGB_ELEMENT_ORDER_BGR : LCD_RGB_ELEMENT_ORDER_RGB,
-        .data_endian = LCD_RGB_DATA_ENDIAN_BIG,
-        .bits_per_pixel = 16,
-    };
-    esp_err_t err = esp_lcd_new_panel_st7789(panel->io_handle, &panel_config, &panel->panel_handle);
+    esp_err_t err;
+    uint8_t pixel_format = 0x55;
+    uint8_t display_function[2] = { 0x0A, 0x82 };
+    uint8_t porch[5] = { 0x0C, 0x0C, 0x00, 0x33, 0x33 };
+    uint8_t gate = 0x35;
+    uint8_t vcom = 0x28;
+    uint8_t lcm = 0x0C;
+    uint8_t vdv_vrh_en[2] = { 0x01, 0xFF };
+    uint8_t vrhs = 0x10;
+    uint8_t vdv = 0x20;
+    uint8_t frctrl2 = 0x0F;
+    uint8_t pwctrl1[2] = { 0xA4, 0xA1 };
+    uint8_t inv_cmd = panel->invert_colors ? 0x21 : 0x20;
 
+    ESP_RETURN_ON_ERROR(dashboard_panel_reset_gpio(reset_gpio, "ST7789"), TAG,
+            "ST7789 reset failed");
+
+    err = dashboard_panel_tx_param(panel, 0x11, NULL, 0);
     if (err == ESP_OK) {
-        err = esp_lcd_panel_reset(panel->panel_handle);
-    }
-    if (err == ESP_OK) {
-        err = esp_lcd_panel_init(panel->panel_handle);
-    }
-    if (err == ESP_OK) {
-        err = esp_lcd_panel_set_gap(panel->panel_handle, panel->x_gap, panel->y_gap);
-    }
-    if (err == ESP_OK && panel->swap_xy) {
-        err = esp_lcd_panel_swap_xy(panel->panel_handle, true);
-    }
-    if (err == ESP_OK && (panel->mirror_x || panel->mirror_y)) {
-        err = esp_lcd_panel_mirror(panel->panel_handle, panel->mirror_x, panel->mirror_y);
-    }
-    if (err == ESP_OK && panel->invert_colors) {
-        /* 颜色反转：若屏幕显示白屏而非深色背景，尝试关闭
-         * CONFIG_HOMEKIT_DASHBOARD_LEFT_INVERT_COLORS。 */
-        err = esp_lcd_panel_invert_color(panel->panel_handle, true);
+        vTaskDelay(pdMS_TO_TICKS(120));
+        err = dashboard_panel_tx_param(panel, 0x13, NULL, 0);
     }
     if (err == ESP_OK) {
-        err = esp_lcd_panel_disp_on_off(panel->panel_handle, true);
+        err = dashboard_st77xx_apply_madctl(panel);
     }
     if (err == ESP_OK) {
-        /* 等待面板完成 Display ON 上电稳定 */
-        vTaskDelay(pdMS_TO_TICKS(20));
+        err = dashboard_panel_tx_param(panel, 0xB6, display_function,
+                sizeof(display_function));
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, ST7789_CMD_RAMCTRL,
+                s_st7789_ramctrl, sizeof(s_st7789_ramctrl));
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0x3A, &pixel_format, 1);
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xB2, porch, sizeof(porch));
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xB7, &gate, 1);
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xBB, &vcom, 1);
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xC0, &lcm, 1);
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xC2, vdv_vrh_en,
+                sizeof(vdv_vrh_en));
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xC3, &vrhs, 1);
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xC4, &vdv, 1);
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xC6, &frctrl2, 1);
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xD0, pwctrl1,
+                sizeof(pwctrl1));
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xE0, s_st7789_positive_gamma,
+                sizeof(s_st7789_positive_gamma));
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0xE1, s_st7789_negative_gamma,
+                sizeof(s_st7789_negative_gamma));
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, inv_cmd, NULL, 0);
+    }
+    if (err == ESP_OK) {
+        err = dashboard_panel_tx_param(panel, 0x29, NULL, 0);
+    }
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(120));
     }
     return err;
 }
@@ -689,6 +781,8 @@ static esp_err_t dashboard_panel_create(dashboard_panel_t *panel,
         panel->soft_spi_mosi = own_mosi_gpio;
         panel->soft_spi_cs = cs_gpio;
         panel->soft_spi_dc = dc_gpio;
+        panel->soft_spi_delay_us = (cs_gpio == CONFIG_HOMEKIT_DASHBOARD_RIGHT_CS) ? 2 : 0;
+        panel->soft_spi_keep_cs_low = false;
     } else {
         esp_lcd_panel_io_spi_config_t io_config = {
             .cs_gpio_num = cs_gpio,
@@ -742,7 +836,8 @@ static esp_err_t dashboard_panel_create(dashboard_panel_t *panel,
 static esp_err_t dashboard_panel_draw_bitmap(dashboard_panel_t *panel,
         int x_start, int y_start, int x_end, int y_end, const void *color_data)
 {
-    if (panel->controller == PANEL_CONTROLLER_ST7789) {
+    if (panel->controller == PANEL_CONTROLLER_ST7789 &&
+            panel->panel_handle && !panel->soft_spi) {
         return esp_lcd_panel_draw_bitmap(panel->panel_handle,
                 x_start, y_start, x_end, y_end, color_data);
     }
@@ -776,6 +871,52 @@ static esp_err_t dashboard_panel_draw_bitmap(dashboard_panel_t *panel,
         err = dashboard_panel_tx_color(panel, 0x2C, color_data, len);
     }
     return err;
+}
+
+static void dashboard_panel_fill_solid_immediate(dashboard_panel_t *panel, uint16_t color)
+{
+    int panel_width = dashboard_panel_visible_width(panel);
+    int panel_height = dashboard_panel_visible_height(panel);
+
+    if (!panel || !s_line_buffer || panel_width <= 0 || panel_height <= 0) {
+        return;
+    }
+    if ((size_t) panel_width > s_line_buffer_pixels) {
+        panel_width = (int) s_line_buffer_pixels;
+    }
+
+    for (int x = 0; x < panel_width; x++) {
+        s_line_buffer[x] = color;
+    }
+    for (int y = 0; y < panel_height; y++) {
+        if (dashboard_panel_draw_bitmap(panel, 0, y, panel_width, y + 1, s_line_buffer) != ESP_OK) {
+            ESP_LOGW(TAG, "Immediate panel fill failed");
+            return;
+        }
+    }
+}
+
+static void dashboard_panel_run_boot_pattern(dashboard_panel_t *panel, const char *panel_name)
+{
+    static const uint16_t colors[] = {
+        RGB565(0xFF, 0x30, 0x30),
+        RGB565(0x30, 0xFF, 0x30),
+        RGB565(0x30, 0x60, 0xFF),
+        RGB565(0x08, 0x10, 0x18),
+    };
+
+    if (!panel) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "%s panel boot pattern %dx%d",
+            panel_name,
+            dashboard_panel_visible_width(panel),
+            dashboard_panel_visible_height(panel));
+    for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); i++) {
+        dashboard_panel_fill_solid_immediate(panel, colors[i]);
+        vTaskDelay(pdMS_TO_TICKS(120));
+    }
 }
 
 static void dashboard_panel_fill_rect(dashboard_panel_t *panel,
@@ -1856,6 +1997,45 @@ static void dashboard_redraw_right(const char *ip_text, const bool light_states[
 {
     int panel_width = dashboard_panel_visible_width(&s_right_panel);
     int panel_height = dashboard_panel_visible_height(&s_right_panel);
+    int landscape_badge_top;
+    int landscape_badge_height;
+
+    if (panel_width > panel_height) {
+        int header_height = FONT_HEIGHT * RIGHT_TITLE_SCALE + 10;
+        int ip_y = header_height + 3;
+        int badge_gap = 6;
+        int badge_width = (panel_width - badge_gap * 4) / 3;
+
+        landscape_badge_top = ip_y + FONT_HEIGHT + 6;
+        landscape_badge_height = panel_height - landscape_badge_top - 6;
+        if (landscape_badge_height < FONT_HEIGHT + 8) {
+            landscape_badge_top = header_height + 4;
+            landscape_badge_height = panel_height - landscape_badge_top - 4;
+        }
+
+        dashboard_panel_fill_rect(&s_right_panel, 0, 0, panel_width, panel_height, s_right_background);
+        dashboard_panel_fill_rect(&s_right_panel, 0, 0, panel_width, header_height, s_right_header);
+        dashboard_draw_text_line(&s_right_panel, 4, "STATUS",
+                s_right_text, s_right_header, RIGHT_TITLE_SCALE, true);
+        dashboard_draw_text_line(&s_right_panel, ip_y, ip_text,
+                s_right_text, s_right_background, 1, false);
+
+        for (size_t i = 0; i < 3; i++) {
+            char row_text[16];
+            int badge_x = badge_gap + (int) i * (badge_width + badge_gap);
+            uint16_t row_color = light_states[i] ? s_right_on : s_right_off;
+
+            dashboard_panel_fill_rect(&s_right_panel, badge_x, landscape_badge_top,
+                    badge_width, landscape_badge_height, row_color);
+            snprintf(row_text, sizeof(row_text), "L%u %s",
+                    (unsigned int) (i + 1), light_states[i] ? "ON" : "OFF");
+            dashboard_draw_text_line(&s_right_panel,
+                    landscape_badge_top + ((landscape_badge_height - FONT_HEIGHT) / 2),
+                    row_text, s_right_text, row_color, 1, true);
+        }
+        return;
+    }
+
     int header_height = FONT_HEIGHT * RIGHT_TITLE_SCALE + 16;
     int ip_y = header_height + 14;
     int row_height = 42;
@@ -2048,6 +2228,9 @@ void dual_panel_display_init(void)
     spi_bus_config_t bus_config;
     size_t max_width;
     esp_err_t err;
+    bool left_uses_soft_spi;
+    bool right_uses_soft_spi;
+    bool need_shared_spi;
 
     if (s_state.initialized) {
         return;
@@ -2082,18 +2265,28 @@ void dual_panel_display_init(void)
     }
     s_line_buffer_pixels = max_width;
 
-    memset(&bus_config, 0, sizeof(bus_config));
-    bus_config.sclk_io_num = CONFIG_HOMEKIT_DASHBOARD_SPI_SCLK;
-    bus_config.mosi_io_num = CONFIG_HOMEKIT_DASHBOARD_SPI_MOSI;
-    bus_config.miso_io_num = -1;
-    bus_config.quadwp_io_num = -1;
-    bus_config.quadhd_io_num = -1;
-    bus_config.max_transfer_sz = (int) (max_width * sizeof(uint16_t));
+    left_uses_soft_spi = (CONFIG_HOMEKIT_DASHBOARD_LEFT_SCLK >= 0 &&
+            CONFIG_HOMEKIT_DASHBOARD_LEFT_MOSI >= 0);
+    right_uses_soft_spi = (CONFIG_HOMEKIT_DASHBOARD_RIGHT_SCLK >= 0 &&
+            CONFIG_HOMEKIT_DASHBOARD_RIGHT_MOSI >= 0);
+    need_shared_spi = !left_uses_soft_spi ||
+            ((CONFIG_HOMEKIT_DASHBOARD_RIGHT_CS >= 0 &&
+              CONFIG_HOMEKIT_DASHBOARD_RIGHT_DC >= 0) && !right_uses_soft_spi);
 
-    err = spi_bus_initialize(DASHBOARD_SPI_HOST, &bus_config, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
-        return;
+    if (need_shared_spi) {
+        memset(&bus_config, 0, sizeof(bus_config));
+        bus_config.sclk_io_num = CONFIG_HOMEKIT_DASHBOARD_SPI_SCLK;
+        bus_config.mosi_io_num = CONFIG_HOMEKIT_DASHBOARD_SPI_MOSI;
+        bus_config.miso_io_num = -1;
+        bus_config.quadwp_io_num = -1;
+        bus_config.quadhd_io_num = -1;
+        bus_config.max_transfer_sz = (int) (max_width * sizeof(uint16_t));
+
+        err = spi_bus_initialize(DASHBOARD_SPI_HOST, &bus_config, SPI_DMA_CH_AUTO);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
+            return;
+        }
     }
 
     err = dashboard_panel_create(&s_left_panel, PANEL_CONTROLLER_ST7789,
@@ -2111,7 +2304,8 @@ void dual_panel_display_init(void)
             CONFIG_HOMEKIT_DASHBOARD_LEFT_RST,
             CONFIG_HOMEKIT_DASHBOARD_LEFT_BL,
             DASH_CFG_LEFT_BL_ACTIVE_HIGH,
-            -1, -1);   /* ST7789 uses shared hardware SPI bus */
+            CONFIG_HOMEKIT_DASHBOARD_LEFT_SCLK,
+            CONFIG_HOMEKIT_DASHBOARD_LEFT_MOSI);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Left panel init failed: %s", esp_err_to_name(err));
         return;
@@ -2120,7 +2314,7 @@ void dual_panel_display_init(void)
 
     if (CONFIG_HOMEKIT_DASHBOARD_RIGHT_CS >= 0 &&
             CONFIG_HOMEKIT_DASHBOARD_RIGHT_DC >= 0) {
-        err = dashboard_panel_create(&s_right_panel, PANEL_CONTROLLER_NV3007,
+        err = dashboard_panel_create(&s_right_panel, DASH_CFG_RIGHT_CONTROLLER,
                 CONFIG_HOMEKIT_DASHBOARD_RIGHT_H_RES,
                 CONFIG_HOMEKIT_DASHBOARD_RIGHT_V_RES,
                 CONFIG_HOMEKIT_DASHBOARD_RIGHT_X_OFFSET,
@@ -2141,6 +2335,7 @@ void dual_panel_display_init(void)
             ESP_LOGE(TAG, "Right panel init failed: %s", esp_err_to_name(err));
         } else {
             s_state.right_available = true;
+            dashboard_panel_run_boot_pattern(&s_right_panel, "Right");
         }
     } else {
         ESP_LOGW(TAG, "Right panel disabled by configuration");
