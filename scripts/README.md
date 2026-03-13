@@ -15,6 +15,10 @@
   通用烧录入口，按设备类型执行 `reconfigure flash`
 - `flash-device.ps1`
   Windows PowerShell 烧录入口，按设备类型执行 `reconfigure flash`
+- `flash-dashboard.sh`
+  固定烧录 `dashboard` 的快捷入口
+- `flash-dashboard.ps1`
+  Windows PowerShell 固定烧录 `dashboard` 的快捷入口
 - `monitor.sh`
   打开串口日志监视
 
@@ -25,6 +29,7 @@
 ./scripts/build-device.sh light
 ./scripts/flash-device.sh outlet -p /dev/cu.usbmodemXXXX
 ./scripts/flash-device.sh light -p /dev/cu.usbmodemXXXX
+./scripts/flash-dashboard.sh -p /dev/cu.usbmodemXXXX
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
 
@@ -32,6 +37,7 @@ Windows PowerShell：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 outlet -p COM5
+powershell -ExecutionPolicy Bypass -File .\scripts\flash-dashboard.ps1 -p COM5
 powershell -ExecutionPolicy Bypass -File .\scripts\idf-run.ps1 --version
 ```
 

@@ -15,6 +15,10 @@ The goal is to reduce repeated typing and standardize `ESP-IDF` invocation.
   Generic flash wrapper that runs `reconfigure flash` by device type
 - `flash-device.ps1`
   Windows PowerShell flash wrapper that runs `reconfigure flash` by device type
+- `flash-dashboard.sh`
+  Fixed dashboard flash shortcut
+- `flash-dashboard.ps1`
+  Windows PowerShell fixed dashboard flash shortcut
 - `monitor.sh`
   Opens the serial monitor
 
@@ -25,6 +29,7 @@ The goal is to reduce repeated typing and standardize `ESP-IDF` invocation.
 ./scripts/build-device.sh light
 ./scripts/flash-device.sh outlet -p /dev/cu.usbmodemXXXX
 ./scripts/flash-device.sh light -p /dev/cu.usbmodemXXXX
+./scripts/flash-dashboard.sh -p /dev/cu.usbmodemXXXX
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
 
@@ -32,6 +37,7 @@ Windows PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 outlet -p COM5
+powershell -ExecutionPolicy Bypass -File .\scripts\flash-dashboard.ps1 -p COM5
 powershell -ExecutionPolicy Bypass -File .\scripts\idf-run.ps1 --version
 ```
 

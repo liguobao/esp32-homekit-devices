@@ -76,7 +76,115 @@
 
 static const char *TAG = "app_wifi";
 static const int WIFI_CONNECTED_EVENT = BIT0;
+static const int WIFI_CONNECT_FAILED_EVENT = BIT1;
 static EventGroupHandle_t wifi_event_group;
+static int s_wifi_retry_count;
+
+#define APP_WIFI_MAX_RETRY_COUNT 5
+
+static const char *app_wifi_disconnect_reason_name(uint8_t reason)
+{
+    switch ((wifi_err_reason_t)reason) {
+        case WIFI_REASON_UNSPECIFIED:
+            return "UNSPECIFIED";
+        case WIFI_REASON_AUTH_EXPIRE:
+            return "AUTH_EXPIRE";
+        case WIFI_REASON_AUTH_LEAVE:
+            return "AUTH_LEAVE";
+        case WIFI_REASON_DISASSOC_DUE_TO_INACTIVITY:
+            return "DISASSOC_DUE_TO_INACTIVITY";
+        case WIFI_REASON_CLASS2_FRAME_FROM_NONAUTH_STA:
+            return "CLASS2_FRAME_FROM_NONAUTH_STA";
+        case WIFI_REASON_CLASS3_FRAME_FROM_NONASSOC_STA:
+            return "CLASS3_FRAME_FROM_NONASSOC_STA";
+        case WIFI_REASON_ASSOC_LEAVE:
+            return "ASSOC_LEAVE";
+        case WIFI_REASON_ASSOC_NOT_AUTHED:
+            return "ASSOC_NOT_AUTHED";
+        case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+            return "4WAY_HANDSHAKE_TIMEOUT";
+        case WIFI_REASON_GROUP_KEY_UPDATE_TIMEOUT:
+            return "GROUP_KEY_UPDATE_TIMEOUT";
+        case WIFI_REASON_TIMEOUT:
+            return "TIMEOUT";
+        case WIFI_REASON_PEER_INITIATED:
+            return "PEER_INITIATED";
+        case WIFI_REASON_AP_INITIATED:
+            return "AP_INITIATED";
+        case WIFI_REASON_BEACON_TIMEOUT:
+            return "BEACON_TIMEOUT";
+        case WIFI_REASON_NO_AP_FOUND:
+            return "NO_AP_FOUND";
+        case WIFI_REASON_AUTH_FAIL:
+            return "AUTH_FAIL";
+        case WIFI_REASON_ASSOC_FAIL:
+            return "ASSOC_FAIL";
+        case WIFI_REASON_HANDSHAKE_TIMEOUT:
+            return "HANDSHAKE_TIMEOUT";
+        case WIFI_REASON_CONNECTION_FAIL:
+            return "CONNECTION_FAIL";
+        case WIFI_REASON_ASSOC_COMEBACK_TIME_TOO_LONG:
+            return "ASSOC_COMEBACK_TIME_TOO_LONG";
+        case WIFI_REASON_SA_QUERY_TIMEOUT:
+            return "SA_QUERY_TIMEOUT";
+        case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
+            return "NO_AP_FOUND_W_COMPATIBLE_SECURITY";
+        case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+            return "NO_AP_FOUND_IN_AUTHMODE_THRESHOLD";
+        case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+            return "NO_AP_FOUND_IN_RSSI_THRESHOLD";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+static const char *app_wifi_auth_mode_name(wifi_auth_mode_t authmode)
+{
+    switch (authmode) {
+        case WIFI_AUTH_OPEN:
+            return "OPEN";
+        case WIFI_AUTH_WEP:
+            return "WEP";
+        case WIFI_AUTH_WPA_PSK:
+            return "WPA_PSK";
+        case WIFI_AUTH_WPA2_PSK:
+            return "WPA2_PSK";
+        case WIFI_AUTH_WPA_WPA2_PSK:
+            return "WPA_WPA2_PSK";
+        case WIFI_AUTH_WPA3_PSK:
+            return "WPA3_PSK";
+        case WIFI_AUTH_WPA2_WPA3_PSK:
+            return "WPA2_WPA3_PSK";
+        case WIFI_AUTH_OWE:
+            return "OWE";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+static const char *app_wifi_cipher_name(wifi_cipher_type_t cipher)
+{
+    switch (cipher) {
+        case WIFI_CIPHER_TYPE_NONE:
+            return "NONE";
+        case WIFI_CIPHER_TYPE_WEP40:
+            return "WEP40";
+        case WIFI_CIPHER_TYPE_WEP104:
+            return "WEP104";
+        case WIFI_CIPHER_TYPE_TKIP:
+            return "TKIP";
+        case WIFI_CIPHER_TYPE_CCMP:
+            return "CCMP";
+        case WIFI_CIPHER_TYPE_TKIP_CCMP:
+            return "TKIP_CCMP";
+        case WIFI_CIPHER_TYPE_GCMP:
+            return "GCMP";
+        case WIFI_CIPHER_TYPE_GCMP256:
+            return "GCMP256";
+        default:
+            return "UNKNOWN";
+    }
+}
 
 
 #ifdef USE_UNIFIED_PROVISIONING
@@ -163,8 +271,26 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                           int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        s_wifi_retry_count = 0;
+        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_EVENT | WIFI_CONNECT_FAILED_EVENT);
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        wifi_event_sta_connected_t *event = (wifi_event_sta_connected_t *)event_data;
+        wifi_ap_record_t ap_info = {0};
+
+        ESP_LOGI(TAG, "Associated with AP '%.*s' on channel %u (authmode=%u:%s)",
+                 event->ssid_len, event->ssid, event->channel,
+                 event->authmode, app_wifi_auth_mode_name(event->authmode));
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            ESP_LOGI(TAG,
+                     "AP info: channel=%u authmode=%u:%s pairwise=%u:%s group=%u:%s",
+                     ap_info.primary, ap_info.authmode,
+                     app_wifi_auth_mode_name(ap_info.authmode),
+                     ap_info.pairwise_cipher,
+                     app_wifi_cipher_name(ap_info.pairwise_cipher),
+                     ap_info.group_cipher,
+                     app_wifi_cipher_name(ap_info.group_cipher));
+        }
 #ifdef ESP_NETIF_SUPPORTED
         esp_netif_create_ip6_linklocal((esp_netif_t *)arg);
 #else
@@ -172,6 +298,8 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 #endif
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        s_wifi_retry_count = 0;
+        xEventGroupClearBits(wifi_event_group, WIFI_CONNECT_FAILED_EVENT);
         ESP_LOGI(TAG, "Connected with IP Address:" IPSTR, IP2STR(&event->ip_info.ip));
         /* Signal main application to continue execution */
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_EVENT);
@@ -179,8 +307,20 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         ip_event_got_ip6_t *event = (ip_event_got_ip6_t *)event_data;
         ESP_LOGI(TAG, "Connected with IPv6 Address:" IPV6STR, IPV62STR(event->ip6_info.ip));
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGI(TAG, "Disconnected. Connecting to the AP again...");
-        esp_wifi_connect();
+        wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
+        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_EVENT);
+        s_wifi_retry_count++;
+        ESP_LOGW(TAG,
+                 "Disconnected from AP '%.*s' (reason=%u:%s, rssi=%d). Retry %d/%d.",
+                 event->ssid_len, event->ssid, event->reason,
+                 app_wifi_disconnect_reason_name(event->reason), event->rssi,
+                 s_wifi_retry_count, APP_WIFI_MAX_RETRY_COUNT);
+        if (s_wifi_retry_count >= APP_WIFI_MAX_RETRY_COUNT) {
+            ESP_LOGW(TAG, "Wi-Fi retry limit reached. Leaving STA disconnected.");
+            xEventGroupSetBits(wifi_event_group, WIFI_CONNECT_FAILED_EVENT);
+        } else {
+            esp_wifi_connect();
+        }
 #ifdef USE_UNIFIED_PROVISIONING
     } else if (event_base == WIFI_PROV_EVENT) {
         switch (event_id) {
@@ -275,6 +415,7 @@ void app_wifi_init(void)
 #define APP_WIFI_PASS   CONFIG_APP_WIFI_PASSWORD
 esp_err_t app_wifi_start(TickType_t ticks_to_wait)
 {
+    EventBits_t bits;
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = APP_WIFI_SSID,
@@ -290,13 +431,22 @@ esp_err_t app_wifi_start(TickType_t ticks_to_wait)
             },
         },
     };
+    s_wifi_retry_count = 0;
+    xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_EVENT | WIFI_CONNECT_FAILED_EVENT);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
     ESP_ERROR_CHECK(esp_wifi_start() );
     /* Wait for Wi-Fi connection */
-    xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_EVENT, false, true, ticks_to_wait);
-    return ESP_OK;
-    return ESP_OK;
+    bits = xEventGroupWaitBits(wifi_event_group,
+            WIFI_CONNECTED_EVENT | WIFI_CONNECT_FAILED_EVENT,
+            false, false, ticks_to_wait);
+    if (bits & WIFI_CONNECTED_EVENT) {
+        return ESP_OK;
+    }
+    if (bits & WIFI_CONNECT_FAILED_EVENT) {
+        return ESP_FAIL;
+    }
+    return ESP_ERR_TIMEOUT;
 }
 #endif
 
@@ -309,6 +459,7 @@ static void wifi_init_sta()
 
 esp_err_t app_wifi_start(TickType_t ticks_to_wait)
 {
+    EventBits_t bits;
 #ifdef USE_UNIFIED_PROVISIONING
     /* Configuration for the provisioning manager */
     wifi_prov_mgr_config_t config = {
@@ -442,7 +593,15 @@ esp_err_t app_wifi_start(TickType_t ticks_to_wait)
         wifi_init_sta();
     }
     /* Wait for Wi-Fi connection */
-    xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_EVENT, false, true, ticks_to_wait);
-    return ESP_OK;
+    bits = xEventGroupWaitBits(wifi_event_group,
+            WIFI_CONNECTED_EVENT | WIFI_CONNECT_FAILED_EVENT,
+            false, false, ticks_to_wait);
+    if (bits & WIFI_CONNECTED_EVENT) {
+        return ESP_OK;
+    }
+    if (bits & WIFI_CONNECT_FAILED_EVENT) {
+        return ESP_FAIL;
+    }
+    return ESP_ERR_TIMEOUT;
 }
 #endif /* CONFIG_APP_WIFI_USE_PROVISIONING */

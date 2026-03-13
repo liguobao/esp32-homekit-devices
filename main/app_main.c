@@ -248,7 +248,9 @@ static void device_thread_entry(void *arg)
     /* After all the initializations are done, start the HAP core */
     hap_start();
     /* Start Wi-Fi */
-    app_wifi_start(portMAX_DELAY);
+    if (app_wifi_start(portMAX_DELAY) != ESP_OK) {
+        ESP_LOGW(TAG, "Wi-Fi connection stopped after repeated failures");
+    }
 
     /* The task ends here. The read/write callbacks will be invoked by the HAP Framework */
     vTaskDelete(NULL);

@@ -34,11 +34,16 @@ static void dashboard_poem_compact_spaces(char *text)
 void dashboard_poem_select_fallback(char *out, size_t out_size, size_t index)
 {
     static const char *const s_poem_fallbacks[] = {
-        "春眠不觉晓",
-        "明月松间照",
-        "山气日夕佳",
-        "夜半钟声到",
-        "江清月近人",
+        "春眠不觉晓，处处闻啼鸟。",
+        "夜来风雨声，花落知多少。",
+        "床前明月光，疑是地上霜。",
+        "江南无所有，聊赠一枝春。",
+        "明月松间照，清泉石上流。",
+        "山气日夕佳，飞鸟相与还。",
+        "夜半钟声到，客船远影孤。",
+        "月落乌啼霜满天，江枫渔火对愁眠。",
+        "知否，知否？应是绿肥红瘦。",
+        "人生若只如初见，何事秋风悲画扇？",
     };
 
     if (!out || out_size == 0) {
