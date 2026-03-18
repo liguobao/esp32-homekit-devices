@@ -27,8 +27,10 @@
 ```sh
 ./scripts/build-device.sh outlet
 ./scripts/build-device.sh light
+./scripts/build-device.sh epaper
 ./scripts/flash-device.sh outlet -p /dev/cu.usbmodemXXXX
 ./scripts/flash-device.sh light -p /dev/cu.usbmodemXXXX
+./scripts/flash-device.sh epaper -p /dev/cu.usbmodemXXXX
 ./scripts/flash-dashboard.sh -p /dev/cu.usbmodemXXXX
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
@@ -37,6 +39,7 @@ Windows PowerShell：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 outlet -p COM5
+powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 epaper -p COM5
 powershell -ExecutionPolicy Bypass -File .\scripts\flash-dashboard.ps1 -p COM5
 powershell -ExecutionPolicy Bypass -File .\scripts\idf-run.ps1 --version
 ```
@@ -50,8 +53,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\idf-run.ps1 --version
 ```
 
 `build-device.sh`、`flash-device.sh` 和 `flash-device.ps1` 会在执行前删除
-`sdkconfig` 与 `sdkconfig.old`，并优先保留当前 `sdkconfig` 里的目标芯片设置，
-这样 `sdkconfig.defaults.local` 的最新改动会被重新生成到新的配置文件里。
+`sdkconfig` 与 `sdkconfig.old`，并按下面顺序确定目标芯片：
+
+1. `sdkconfig.defaults.local`
+2. 设备默认目标：`epaper -> esp32s3`，其余设备 -> `sdkconfig.defaults`
+3. 现有 `sdkconfig`
+
+这样 `sdkconfig.defaults.local` 的最新改动会被重新生成到新的配置文件里，
+同时 `epaper` 可以直接切到 `ESP32-S3`。
 
 ## 编写新脚本
 

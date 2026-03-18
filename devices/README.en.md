@@ -11,7 +11,7 @@ This directory contains different HomeKit device implementations and their share
 - `device.c`
   Dispatcher for the active device type
 - `<type>/`
-  One directory per device type, such as `outlet/`, `light/`, and `dashboard/`
+  One directory per device type, such as `outlet/`, `light/`, `dashboard/`, and `epaper/`
 
 ## How to Add a New Device
 
@@ -26,7 +26,9 @@ This directory contains different HomeKit device implementations and their share
 
 ## Current Selection Model
 
-The project currently ships with `outlet`, `light`, and `dashboard`, selected by `HOMEKIT_DEVICE_TYPE` at build time.
+The project currently ships with `outlet`, `light`, `dashboard`, and `epaper`,
+selected by `HOMEKIT_DEVICE_TYPE` at build time.
+`epaper` defaults to `esp32s3`, while the other variants default to `esp32c3`.
 
 Example:
 
@@ -34,4 +36,11 @@ Example:
 HOMEKIT_DEVICE_TYPE=outlet idf.py reconfigure build
 HOMEKIT_DEVICE_TYPE=light idf.py reconfigure build
 HOMEKIT_DEVICE_TYPE=dashboard idf.py reconfigure build
+idf.py -DIDF_TARGET=esp32s3 -DHOMEKIT_DEVICE_TYPE=epaper reconfigure build
 ```
+
+Device-specific notes:
+
+- `devices/epaper/README.en.md`
+  Full board logic, configuration, and build flow for `Waveshare ESP32-S3-ePaper-1.54 V2`,
+  including ePaper, sensors, RTC, battery, audio, Micro SD, custom buttons, and deep sleep

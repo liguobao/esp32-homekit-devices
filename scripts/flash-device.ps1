@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("outlet", "light", "dashboard")]
+    [ValidateSet("outlet", "light", "dashboard", "epaper")]
     [string]$DeviceType,
 
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
@@ -33,6 +33,22 @@ function Get-ConfigTarget {
     }
 
     return $match.Matches[0].Groups[1].Value
+}
+
+function Get-DefaultTargetForDevice {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DeviceTypeToCheck
+    )
+
+    switch ($DeviceTypeToCheck) {
+        "epaper" {
+            return "esp32s3"
+        }
+        default {
+            return Get-ConfigTarget -ConfigPath (Join-Path $projectDir "sdkconfig.defaults")
+        }
+    }
 }
 
 function Get-CachedBuildTarget {
@@ -124,9 +140,12 @@ if (-not $IdfArgs -or $IdfArgs.Count -eq 0) {
     $IdfArgs += @("reconfigure", "flash")
 }
 
-$idfTarget = Get-ConfigTarget -ConfigPath (Join-Path $projectDir "sdkconfig")
+$idfTarget = Get-ConfigTarget -ConfigPath (Join-Path $projectDir "sdkconfig.defaults.local")
 if (-not $idfTarget) {
-    $idfTarget = Get-ConfigTarget -ConfigPath (Join-Path $projectDir "sdkconfig.defaults")
+    $idfTarget = Get-DefaultTargetForDevice -DeviceTypeToCheck $DeviceType
+}
+if (-not $idfTarget) {
+    $idfTarget = Get-ConfigTarget -ConfigPath (Join-Path $projectDir "sdkconfig")
 }
 
 $buildTarget = Get-CachedBuildTarget -CachePath (Join-Path $projectDir "build\\CMakeCache.txt")

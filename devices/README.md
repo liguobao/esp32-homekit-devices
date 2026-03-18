@@ -12,7 +12,7 @@
 - `device.c`
   当前激活设备的分发逻辑
 - `<type>/`
-  每种设备一个目录，例如 `outlet/`、`light/`、`dashboard/`
+  每种设备一个目录，例如 `outlet/`、`light/`、`dashboard/`、`epaper/`
 
 ## 如何新增一个设备
 
@@ -27,11 +27,19 @@
 
 ## 当前切换方式
 
-当前工程内置了 `outlet`、`light` 和 `dashboard` 三种设备类型，构建时通过 `HOMEKIT_DEVICE_TYPE` 切换。
+当前工程内置了 `outlet`、`light`、`dashboard` 和 `epaper` 四种设备类型，构建时通过 `HOMEKIT_DEVICE_TYPE` 切换。
+其中 `epaper` 默认构建到 `esp32s3`，其余设备默认构建到 `esp32c3`。
 示例：
 
 ```sh
 HOMEKIT_DEVICE_TYPE=outlet idf.py reconfigure build
 HOMEKIT_DEVICE_TYPE=light idf.py reconfigure build
 HOMEKIT_DEVICE_TYPE=dashboard idf.py reconfigure build
+idf.py -DIDF_TARGET=esp32s3 -DHOMEKIT_DEVICE_TYPE=epaper reconfigure build
 ```
+
+专项说明：
+
+- `devices/epaper/README.md`
+  Waveshare `ESP32-S3-ePaper-1.54 V2` 的完整板级逻辑、配置和构建方式，
+  包括墨水屏、温湿度、RTC、电池、音频、Micro SD、自定义按键和深度睡眠

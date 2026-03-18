@@ -1,0 +1,10 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# 8 MB layout for Waveshare ESP32-S3-ePaper-1.54 V2.
+sec_cert,    0x3F, ,         0xd000,    0x3000,
+nvs,         data, nvs,      0x10000,   0x6000,
+otadata,     data, ota,      ,          0x2000,
+phy_init,    data, phy,      ,          0x1000,
+ota_0,       app,  ota_0,    0x20000,   3584K,
+ota_1,       app,  ota_1,    ,          3584K,
+factory_nvs, data, nvs,      0x720000,  0x6000,
+nvs_keys,    data, nvs_keys, 0x726000,  0x1000,

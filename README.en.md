@@ -1,23 +1,30 @@
 # ESP32 HomeKit
 
-This is an `ESP32-C3` HomeKit demo project based on Espressif `esp-homekit-sdk`.
-The repository currently ships with three device variants: `outlet`, `light`, and `dashboard`.
+This is a HomeKit demo project based on Espressif `esp-homekit-sdk`.
+The repository currently ships with four device variants: `outlet`, `light`,
+`dashboard`, and `epaper`.
+`outlet/light/dashboard` target `ESP32-C3` by default, while `epaper` targets
+the `Waveshare ESP32-S3-ePaper-1.54 V2`.
 
 ## Prerequisites
 
 - Install `ESP-IDF 5.4.2`, typically at `$HOME/.espressif/frameworks/esp-idf-v5.4.2`
-- Connect a working `ESP32-C3` development board
+- Connect a supported board:
+  `ESP32-C3` for `outlet/light/dashboard`, or `Waveshare ESP32-S3-ePaper-1.54 V2` for `epaper`
 - Keep Wi-Fi credentials in the local override file instead of tracked defaults
 
 Prepare local Wi-Fi config:
 
 ```sh
 cp sdkconfig.defaults.local.example sdkconfig.defaults.local
+# Or, for the Waveshare V2 ePaper board:
+cp sdkconfig.defaults.local.epaper-v2.example sdkconfig.defaults.local
 ```
 
 Note: `build-device.sh`, `flash-device.sh`, and `flash-device.ps1` delete `sdkconfig` and `sdkconfig.old`
-before each run, while preserving the current target from `sdkconfig` when available,
-so the latest `sdkconfig.defaults.local` changes are always rebuilt into a fresh config.
+before each run, and prefer the target set in `sdkconfig.defaults.local`.
+If no local target is set, `outlet/light/dashboard` fall back to `esp32c3` from
+`sdkconfig.defaults`, while `epaper` falls back to `esp32s3`.
 
 ## Quick Scripts
 
@@ -45,10 +52,51 @@ Switch to `dashboard`:
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
 
+Switch to `epaper`:
+
+```sh
+./scripts/build-device.sh epaper
+./scripts/flash-device.sh epaper -p /dev/cu.usbmodemXXXX
+./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
+```
+
+## Waveshare ESP32-S3-ePaper-1.54 V2
+
+The `epaper` device type ports the main board logic from Waveshare's official
+`ESP-IDF` V2 examples and companion board components:
+
+- `1.54-inch` `200x200` ePaper driver and refresh flow
+- `SHTC3` temperature and humidity sampling
+- `PCF85063` RTC reads
+- battery voltage reporting plus a HomeKit battery service
+- audio record, playback, and demo PCM playback
+- `Micro SD` mounting, status snapshots, and optional CSV logging
+- custom `BOOT/PWR` button handling
+- `RTC` timed wake and deep-sleep flow
+- V2 board power sequencing plus the local dashboard UI
+
+Only `V2` hardware is supported here. `V1` and `V2` use different official examples.
+
+- `Example/ESP-IDF/V2/12_RTC_Sleep_Test`
+- `Example/ESP-IDF/V2/03_I2C_SHTC3`
+- `Example/ESP-IDF/V2/02_I2C_PCF85063`
+
+Additional notes:
+
+- `epaper` uses the V2 `8MB Flash / 8MB PSRAM` defaults and the `partitions_hap_epaper.csv` layout
+- The dashboard now shows temperature, humidity, RTC time, battery, SD, audio status, and wake reason
+- Default button mapping:
+  `BOOT` single-click records audio, double-click plays the recording, hold `3s` resets Wi-Fi, hold `10s` resets to factory settings;
+  `PWR` single-click plays the demo clip, double-click writes an SD status snapshot, and long press enters deep sleep
+
+See [devices/epaper/README.en.md](devices/epaper/README.en.md) for board details.
+
 ## Windows (PowerShell)
 
 If you are using regular `PowerShell` on Windows, set the target first, then use either the script wrapper or plain `idf.py`.
-The default examples still target `ESP32-C3`; if you are using a classic `ESP32` board, replace `esp32c3` below with `esp32`.
+`outlet/light/dashboard` still default to `ESP32-C3`.
+If you are using `epaper`, replace `esp32c3` below with `esp32s3`, or copy
+`sdkconfig.defaults.local.epaper-v2.example` first.
 
 ```powershell
 Copy-Item sdkconfig.defaults.local.example sdkconfig.defaults.local
@@ -61,6 +109,7 @@ Flash with the PowerShell wrapper:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 outlet -p COM5
+powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 epaper -p COM5
 cmd /c """$idfPath\export.bat"" && idf.py -p COM5 monitor"
 ```
 
@@ -132,7 +181,10 @@ Run this once for the first build, or after changing the target chip:
 ```sh
 export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
 . "$IDF_PATH/export.sh"
+# `outlet/light/dashboard`
 idf.py set-target esp32c3
+# `epaper`
+# idf.py set-target esp32s3
 ```
 
 Build `outlet` manually:
@@ -157,6 +209,14 @@ Build `dashboard` manually:
 export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
 . "$IDF_PATH/export.sh"
 HOMEKIT_DEVICE_TYPE=dashboard idf.py reconfigure build
+```
+
+Build `epaper` manually:
+
+```sh
+export IDF_PATH=$HOME/.espressif/frameworks/esp-idf-v5.4.2
+. "$IDF_PATH/export.sh"
+idf.py -DIDF_TARGET=esp32s3 -DHOMEKIT_DEVICE_TYPE=epaper reconfigure build
 ```
 
 Flash and monitor manually:

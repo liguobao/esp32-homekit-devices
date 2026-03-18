@@ -104,6 +104,10 @@ static void reset_key_init(uint32_t key_gpio_pin)
 
 static bool should_init_reset_key(const homekit_device_t *device)
 {
+    if (device && device->uses_custom_buttons) {
+        ESP_LOGI(TAG, "Skipping shared reset key because the device manages its own buttons");
+        return false;
+    }
 #if CONFIG_IDF_TARGET_ESP32C3
     if (device && device->uses_custom_display && RESET_GPIO == GPIO_NUM_9) {
         ESP_LOGW(TAG, "Skipping reset key on GPIO9 because it conflicts with the dashboard display wiring");

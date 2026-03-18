@@ -6,14 +6,15 @@
 
 ## 项目概览
 
-基于 Espressif `esp-homekit-sdk` 的 ESP32-C3 HomeKit 工程，支持 `outlet`、`light`、`dashboard` 三种设备类型，通过编译时宏 `HOMEKIT_DEVICE_TYPE` 切换。
+基于 Espressif `esp-homekit-sdk` 的 HomeKit 工程，支持 `outlet`、`light`、`dashboard`、`epaper` 四种设备类型，通过编译时宏 `HOMEKIT_DEVICE_TYPE` 切换。
 
-- **目标芯片**：`ESP32-C3`
+- **目标芯片**：`ESP32-C3`（`outlet/light/dashboard`）和 `ESP32-S3`（`epaper`）
 - **工具链**：`ESP-IDF 5.4.2`，默认路径 `$HOME/.espressif/frameworks/esp-idf-v5.4.2`
 - **HomeKit 协议栈**：`third_party/esp-homekit-sdk`（vendored）
 - **默认设备**：`outlet`
 - **GPIO 输出**：`GPIO2`，逻辑为 `active-low`
 - **默认配对码**：`111-22-333`
+- **Waveshare 支持**：`epaper` 设备类型当前面向 `ESP32-S3-ePaper-1.54 V2`
 
 ---
 
@@ -22,7 +23,7 @@
 ```
 main/app_main.c          # 共享 Wi-Fi 与 HomeKit 启动逻辑（勿按设备复制）
 devices/device.c         # 当前设备分发逻辑
-devices/<type>/          # 各设备类型实现（outlet / light / dashboard）
+devices/<type>/          # 各设备类型实现（outlet / light / dashboard / epaper）
 devices/common/          # 共享硬件辅助模块
 devices/include/         # 公共头文件
 scripts/                 # 构建、烧录、监控脚本
@@ -42,6 +43,9 @@ skills/                  # 仓库内 AI 工作流技能定义
 # 复制本地 Wi-Fi 配置（不要提交）
 cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 # 编辑 sdkconfig.defaults.local，填写真实 Wi-Fi SSID/密码
+
+# Waveshare ESP32-S3-ePaper-1.54 V2 可直接使用专用模板
+cp sdkconfig.defaults.local.epaper-v2.example sdkconfig.defaults.local
 ```
 
 ### 常用命令（macOS / Linux）
@@ -51,11 +55,13 @@ cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 ./scripts/build-device.sh outlet
 ./scripts/build-device.sh light
 ./scripts/build-device.sh dashboard
+./scripts/build-device.sh epaper
 
 # 烧录（替换 /dev/cu.usbmodemXXXX 为实际端口）
 ./scripts/flash-device.sh outlet  -p /dev/cu.usbmodemXXXX
 ./scripts/flash-device.sh light   -p /dev/cu.usbmodemXXXX
 ./scripts/flash-device.sh dashboard -p /dev/cu.usbmodemXXXX
+./scripts/flash-device.sh epaper -p /dev/cu.usbmodemXXXX
 
 # 串口监控
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
@@ -65,6 +71,7 @@ cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 
 ```powershell
 .\scripts\flash-device.ps1 outlet -p COM5
+.\scripts\flash-device.ps1 epaper -p COM5
 ```
 
 ### 直接使用 idf.py（不走脚本）
@@ -74,6 +81,9 @@ cp sdkconfig.defaults.local.example sdkconfig.defaults.local
 rm -f sdkconfig sdkconfig.old
 idf.py -DHOMEKIT_DEVICE_TYPE=outlet reconfigure build
 
+# ePaper 设备类型需要 ESP32-S3
+idf.py -DIDF_TARGET=esp32s3 -DHOMEKIT_DEVICE_TYPE=epaper reconfigure build
+
 # 烧录
 idf.py -p /dev/cu.usbmodemXXXX flash
 
@@ -81,7 +91,7 @@ idf.py -p /dev/cu.usbmodemXXXX flash
 idf.py -p /dev/cu.usbmodemXXXX monitor
 ```
 
-> **注意**：`build-device.sh` 在每次执行前会删除 `sdkconfig` / `sdkconfig.old`，并保留芯片目标设置，确保本地覆盖配置生效。直接使用 `idf.py` 时你需要手动处理这些清理步骤。
+> **注意**：`build-device.sh` 在每次执行前会删除 `sdkconfig` / `sdkconfig.old`，并优先读取 `sdkconfig.defaults.local`。如果本地未指定目标芯片，`epaper` 默认切到 `esp32s3`，其余设备沿用 `sdkconfig.defaults`。直接使用 `idf.py` 时你需要手动处理这些清理步骤。
 
 ---
 
@@ -101,7 +111,7 @@ idf.py -p /dev/cu.usbmodemXXXX monitor
 ## 添加新设备类型
 
 1. 阅读 `devices/README.md` 了解现有设备实现。
-2. 在 `devices/<name>/` 下创建新设备实现（参考 `devices/outlet/` 或 `devices/light/`）。
+2. 在 `devices/<name>/` 下创建新设备实现（参考 `devices/outlet/`、`devices/light/` 或 `devices/epaper/`）。
 3. 更新 `devices/CMakeLists.txt`，将新目录加入构建。
 4. 在 `devices/device.c` 中添加对新类型的分发逻辑。
 5. 在顶层 `CMakeLists.txt` 中确认新类型已被包含。
@@ -116,6 +126,7 @@ idf.py -p /dev/cu.usbmodemXXXX monitor
 |------|---------|
 | 构建失败，提示找不到 `idf.py` | 确认已安装 ESP-IDF 5.4.2 并执行过 `. $IDF_PATH/export.sh` |
 | 芯片目标不匹配导致构建报错 | 删除 `build/` 目录后重新执行 `build-device.sh` |
+| `epaper` 构建到了 `ESP32-C3` | 检查是否使用了 `sdkconfig.defaults.local.epaper-v2.example`，或确认本地配置没有覆盖掉 `esp32s3` |
 | Wi-Fi 无法连接 | 检查 `sdkconfig.defaults.local` 里的 SSID/密码是否正确 |
 | HomeKit 配对失败 | 确认手机与设备处于同一局域网，使用配对码 `11122333` |
 | `sdkconfig` 改动不生效 | 脚本会删除旧 `sdkconfig`，修改 `sdkconfig.defaults.local` 即可生效 |
@@ -126,5 +137,6 @@ idf.py -p /dev/cu.usbmodemXXXX monitor
 
 - ESP-IDF 文档：<https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/>
 - esp-homekit-sdk：<https://github.com/espressif/esp-homekit-sdk>
+- Waveshare ESP32-S3-ePaper-1.54：<https://github.com/waveshareteam/ESP32-S3-ePaper-1.54>
 - Espressif Component Registry：<https://components.espressif.com/>
 - HomeKit 配对二维码生成：<https://espressif.github.io/esp-homekit-sdk/qrcode.html?data=X-HM://00718C331C3HK>

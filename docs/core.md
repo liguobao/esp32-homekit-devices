@@ -2,8 +2,10 @@
 
 ## 当前默认配置
 
-- 目标芯片：`ESP32-C3`
+- 默认目标芯片：`ESP32-C3`
+- `epaper` 设备目标芯片：`ESP32-S3`
 - 默认设备类型：`Outlet`
+- 已支持设备类型：`outlet`、`light`、`dashboard`、`epaper`
 - 默认配件名前缀：`Home Outlet`
 - 默认输出脚：`GPIO2`
 - 输出逻辑：`active-low`
@@ -23,6 +25,13 @@
 - `skills/`
   仓库内 AI 工作流技能
 
+## ePaper 设备说明
+
+- `epaper` 设备类型面向 `Waveshare ESP32-S3-ePaper-1.54 V2`
+- 当前已迁移板级供电控制、墨水屏显示、`SHTC3` 温湿度读取和 `PCF85063` RTC 读时
+- `epaper` 通过脚本构建时默认切到 `esp32s3`
+- 官方 `V1` 和 `V2` 例程不兼容，当前仅支持 `V2`
+
 ## 核心依赖
 
 - `ESP-IDF 5.4.2`
@@ -38,7 +47,7 @@
 2. 确保 iPhone 或 iPad 与设备处于同一局域网。
 3. 打开“家庭”App 并选择“添加配件”。
 4. 扫描二维码，或选择“没有代码或无法扫描”。
-5. 选择附近的 `Home Outlet-XXXX`。
+5. 选择附近的 `Home Outlet-XXXX`，或 `epaper` 设备对应的 `Home Sensor-XXXX`。
 6. 输入配对码 `11122333`。
 
 二维码链接：
@@ -58,6 +67,7 @@
 
 - `ESP-IDF`: `https://github.com/espressif/esp-idf`
 - `esp-homekit-sdk`: `https://github.com/espressif/esp-homekit-sdk`
+- `Waveshare ESP32-S3-ePaper-1.54`: `https://github.com/waveshareteam/ESP32-S3-ePaper-1.54`
 - Espressif Component Registry: `https://components.espressif.com/`
 
 感谢 Espressif 以及相关开源项目的维护者和贡献者。

@@ -27,8 +27,10 @@ The goal is to reduce repeated typing and standardize `ESP-IDF` invocation.
 ```sh
 ./scripts/build-device.sh outlet
 ./scripts/build-device.sh light
+./scripts/build-device.sh epaper
 ./scripts/flash-device.sh outlet -p /dev/cu.usbmodemXXXX
 ./scripts/flash-device.sh light -p /dev/cu.usbmodemXXXX
+./scripts/flash-device.sh epaper -p /dev/cu.usbmodemXXXX
 ./scripts/flash-dashboard.sh -p /dev/cu.usbmodemXXXX
 ./scripts/monitor.sh -p /dev/cu.usbmodemXXXX
 ```
@@ -37,6 +39,7 @@ Windows PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 outlet -p COM5
+powershell -ExecutionPolicy Bypass -File .\scripts\flash-device.ps1 epaper -p COM5
 powershell -ExecutionPolicy Bypass -File .\scripts\flash-dashboard.ps1 -p COM5
 powershell -ExecutionPolicy Bypass -File .\scripts\idf-run.ps1 --version
 ```
@@ -50,9 +53,14 @@ You can append extra `idf.py` arguments directly:
 ```
 
 `build-device.sh`, `flash-device.sh`, and `flash-device.ps1` delete
-`sdkconfig` and `sdkconfig.old` before running, while preserving the current
-target from `sdkconfig` when available, so the latest `sdkconfig.defaults.local`
-values are always regenerated into a fresh config.
+`sdkconfig` and `sdkconfig.old` before running, then resolve the target in this order:
+
+1. `sdkconfig.defaults.local`
+2. Device default target: `epaper -> esp32s3`, all other variants -> `sdkconfig.defaults`
+3. Existing `sdkconfig`
+
+This keeps `sdkconfig.defaults.local` authoritative while letting `epaper`
+switch to `ESP32-S3` automatically.
 
 ## How to Add a New Script
 

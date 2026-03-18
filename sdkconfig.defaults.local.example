@@ -1,5 +1,6 @@
 # Copy this file to sdkconfig.defaults.local and fill in your own Wi-Fi credentials.
 # The sdkconfig.defaults.local file is ignored by git.
+# For Waveshare ESP32-S3-ePaper-1.54 V2, use sdkconfig.defaults.local.epaper-v2.example instead.
 
 CONFIG_APP_WIFI_SSID="your-wifi-ssid"
 CONFIG_APP_WIFI_PASSWORD="your-wifi-password"

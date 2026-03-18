@@ -1,0 +1,10 @@
+# Copy this file to sdkconfig.defaults.local for Waveshare ESP32-S3-ePaper-1.54 V2.
+# V1 and V2 use different examples and are not compatible.
+
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_APP_WIFI_SSID="your-wifi-ssid"
+CONFIG_APP_WIFI_PASSWORD="your-wifi-password"
+
+# Optional overrides:
+# CONFIG_HOMEKIT_EPAPER_REFRESH_INTERVAL_SEC=60
+# CONFIG_HOMEKIT_EPAPER_TEMP_OFFSET_DECICELSIUS=-40

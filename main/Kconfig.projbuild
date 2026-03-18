@@ -146,6 +146,129 @@ menu "Example Configuration"
 
     endmenu
 
+    menu "ePaper Device Configuration"
+
+        config HOMEKIT_EPAPER_REFRESH_INTERVAL_SEC
+            int "Refresh interval (seconds)"
+            default 30
+            help
+                Sampling and display refresh interval for the Waveshare
+                ESP32-S3-ePaper-1.54 V2 sensor dashboard.
+
+        config HOMEKIT_EPAPER_TEMP_OFFSET_DECICELSIUS
+            int "Temperature offset (0.1 C)"
+            default -40
+            help
+                Temperature compensation applied to the raw SHTC3 reading.
+                The default -40 equals -4.0 C and follows Waveshare's V2 sample.
+
+        config HOMEKIT_EPAPER_SPI_CLOCK_HZ
+            int "ePaper SPI clock (Hz)"
+            default 10000000
+            help
+                SPI clock used by the 1.54-inch ePaper panel.
+
+        config HOMEKIT_EPAPER_WIDTH
+            int "ePaper width"
+            default 200
+
+        config HOMEKIT_EPAPER_HEIGHT
+            int "ePaper height"
+            default 200
+
+        config HOMEKIT_EPAPER_PIN_DC
+            int "ePaper DC GPIO"
+            default 10
+
+        config HOMEKIT_EPAPER_PIN_CS
+            int "ePaper CS GPIO"
+            default 11
+
+        config HOMEKIT_EPAPER_PIN_SCLK
+            int "ePaper SCLK GPIO"
+            default 12
+
+        config HOMEKIT_EPAPER_PIN_MOSI
+            int "ePaper MOSI GPIO"
+            default 13
+
+        config HOMEKIT_EPAPER_PIN_RST
+            int "ePaper reset GPIO"
+            default 9
+
+        config HOMEKIT_EPAPER_PIN_BUSY
+            int "ePaper busy GPIO"
+            default 8
+
+        config HOMEKIT_EPAPER_PIN_PWR
+            int "ePaper power GPIO"
+            default 6
+
+        config HOMEKIT_EPAPER_PIN_AUDIO_PWR
+            int "Audio power GPIO"
+            default 42
+
+        config HOMEKIT_EPAPER_PIN_VBAT_PWR
+            int "VBAT power GPIO"
+            default 17
+
+        config HOMEKIT_EPAPER_PIN_BOOT
+            int "BOOT button GPIO"
+            default 0
+
+        config HOMEKIT_EPAPER_PIN_PWR_KEY
+            int "PWR button GPIO"
+            default 18
+
+        config HOMEKIT_EPAPER_PIN_RTC_INT
+            int "RTC interrupt GPIO"
+            default 5
+
+        config HOMEKIT_EPAPER_I2C_SDA
+            int "I2C SDA GPIO"
+            default 47
+
+        config HOMEKIT_EPAPER_I2C_SCL
+            int "I2C SCL GPIO"
+            default 48
+
+        config HOMEKIT_EPAPER_I2C_RTC_ADDR
+            hex "RTC I2C address"
+            default 0x51
+
+        config HOMEKIT_EPAPER_I2C_SHTC3_ADDR
+            hex "SHTC3 I2C address"
+            default 0x70
+
+        config HOMEKIT_EPAPER_AUDIO_BUFFER_KB
+            int "Audio buffer size (KB)"
+            default 192
+            help
+                Buffer used for on-board microphone record and playback.
+
+        config HOMEKIT_EPAPER_SLEEP_WAKE_INTERVAL_SEC
+            int "RTC wake interval for deep sleep (seconds)"
+            default 30
+            help
+                When the PWR key requests deep sleep, the RTC alarm is
+                scheduled this many seconds in the future.
+
+        config HOMEKIT_EPAPER_LOW_BATTERY_LEVEL
+            int "Low battery threshold (%)"
+            default 10
+            range 1 100
+            help
+                Threshold used for HomeKit low-battery reporting.
+
+        config HOMEKIT_EPAPER_ENABLE_SD_LOGGING
+            bool "Append periodic sensor logs to Micro SD"
+            default n
+            help
+                Append CSV sensor lines to /sdcard/homekit-epaper-log.csv when
+                a card is mounted.
+
+    endmenu
+
     menu "Dashboard Device Configuration"
 
         config HOMEKIT_DASHBOARD_LIGHT_ACTIVE_LOW

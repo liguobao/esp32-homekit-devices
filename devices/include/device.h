@@ -16,6 +16,7 @@ typedef struct {
     hap_identify_routine_t identify;
     int (*add_services)(hap_acc_t *accessory);
     bool uses_custom_display;
+    bool uses_custom_buttons;
     void (*init_hardware)(void);
     void (*start_runtime_services)(void);
 } homekit_device_t;

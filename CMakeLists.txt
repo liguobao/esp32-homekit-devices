@@ -10,17 +10,24 @@ endif()
 string(TOLOWER "${HOMEKIT_DEVICE_TYPE}" HOMEKIT_DEVICE_TYPE)
 set(HOMEKIT_DEVICE_TYPE "${HOMEKIT_DEVICE_TYPE}" CACHE STRING
     "Selected HomeKit device type" FORCE)
-set_property(CACHE HOMEKIT_DEVICE_TYPE PROPERTY STRINGS outlet light dashboard)
+set_property(CACHE HOMEKIT_DEVICE_TYPE PROPERTY STRINGS outlet light dashboard epaper)
 if(NOT HOMEKIT_DEVICE_TYPE STREQUAL "outlet" AND
         NOT HOMEKIT_DEVICE_TYPE STREQUAL "light" AND
-        NOT HOMEKIT_DEVICE_TYPE STREQUAL "dashboard")
+        NOT HOMEKIT_DEVICE_TYPE STREQUAL "dashboard" AND
+        NOT HOMEKIT_DEVICE_TYPE STREQUAL "epaper")
     message(FATAL_ERROR
         "Unsupported HOMEKIT_DEVICE_TYPE='${HOMEKIT_DEVICE_TYPE}'. "
-        "Use 'outlet', 'light', or 'dashboard'.")
+        "Use 'outlet', 'light', 'dashboard', or 'epaper'.")
 endif()
 message(STATUS "HomeKit device type: ${HOMEKIT_DEVICE_TYPE}")
 set(SDKCONFIG_DEFAULTS
     "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
+set(DEVICE_SDKCONFIG_DEFAULTS
+    "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.${HOMEKIT_DEVICE_TYPE}")
+if(EXISTS "${DEVICE_SDKCONFIG_DEFAULTS}")
+    list(APPEND SDKCONFIG_DEFAULTS
+        "${DEVICE_SDKCONFIG_DEFAULTS}")
+endif()
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.local")
     list(APPEND SDKCONFIG_DEFAULTS
         "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.local")
