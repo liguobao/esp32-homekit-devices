@@ -253,6 +253,13 @@ menu "Example Configuration"
                 When the PWR key requests deep sleep, the RTC alarm is
                 scheduled this many seconds in the future.
 
+        config HOMEKIT_EPAPER_TIMEZONE
+            string "RTC sync timezone (TZ)"
+            default "CST-8"
+            help
+                POSIX TZ string used when SNTP time is written back to the
+                onboard RTC after Wi-Fi comes up.
+
         config HOMEKIT_EPAPER_LOW_BATTERY_LEVEL
             int "Low battery threshold (%)"
             default 10

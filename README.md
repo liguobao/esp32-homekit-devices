@@ -69,7 +69,7 @@ cp sdkconfig.defaults.local.epaper-v2.example sdkconfig.defaults.local
 - `SHTC3` 温湿度采集
 - `PCF85063` RTC 读时
 - 锂电池电压检测与 HomeKit 电池服务
-- 音频录音、回放和板载示例音频播放
+- 音频录音、回放，以及 SD 音乐 / 固件内置音频回退播放
 - `Micro SD` 挂载、状态快照写入，以及可选 CSV 日志
 - `BOOT/PWR` 自定义按键逻辑
 - `RTC` 定时唤醒与深度睡眠
@@ -88,7 +88,7 @@ cp sdkconfig.defaults.local.epaper-v2.example sdkconfig.defaults.local
 - 看板会显示温湿度、RTC 时间、电池、SD、音频状态和唤醒来源
 - 默认按键映射：
   `BOOT` 单击录音，双击播放录音，长按 `3s` 重置 Wi-Fi，长按 `10s` 恢复出厂；
-  `PWR` 单击播放示例音频，双击写入 SD 状态快照，长按进入深度睡眠
+  `PWR` 单击优先播放 `/sdcard/music` 下的首个 `mp3/wav`，无 SD 或无音频时回退到固件内置音频；双击写入 SD 状态快照，长按进入深度睡眠
 
 更详细的板级说明见 [devices/epaper/README.md](devices/epaper/README.md)。
 

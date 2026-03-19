@@ -47,7 +47,7 @@ idf_component_register(
         mbedtls
         sdmmc
     EMBED_FILES
-        "epaper/canon.pcm")
+        "epaper/embedded_music.mp3")
 
 if(HOMEKIT_DEVICE_TYPE STREQUAL "light")
     target_compile_definitions(${COMPONENT_LIB} PUBLIC

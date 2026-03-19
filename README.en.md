@@ -69,7 +69,7 @@ The `epaper` device type ports the main board logic from Waveshare's official
 - `SHTC3` temperature and humidity sampling
 - `PCF85063` RTC reads
 - battery voltage reporting plus a HomeKit battery service
-- audio record, playback, and demo PCM playback
+- audio record, playback, plus SD music playback with embedded-audio fallback
 - `Micro SD` mounting, status snapshots, and optional CSV logging
 - custom `BOOT/PWR` button handling
 - `RTC` timed wake and deep-sleep flow
@@ -87,7 +87,7 @@ Additional notes:
 - The dashboard now shows temperature, humidity, RTC time, battery, SD, audio status, and wake reason
 - Default button mapping:
   `BOOT` single-click records audio, double-click plays the recording, hold `3s` resets Wi-Fi, hold `10s` resets to factory settings;
-  `PWR` single-click plays the demo clip, double-click writes an SD status snapshot, and long press enters deep sleep
+  `PWR` single-click plays the first `mp3/wav` under `/sdcard/music`, or falls back to the embedded firmware audio when SD music is unavailable; double-click writes an SD status snapshot, and long press enters deep sleep
 
 See [devices/epaper/README.en.md](devices/epaper/README.en.md) for board details.
 

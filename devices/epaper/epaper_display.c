@@ -652,8 +652,8 @@ static void epaper_draw_dashboard_screen(const epaper_dashboard_state_t *state)
     epaper_draw_text_at(143, 77, value_text, true, 1);
 
     epaper_draw_text_at(4, 113, "MUSIC:", true, 1);
-    music_text = state->sd_mounted ? state->music_file : "NO SD CARD";
-    music_status = state->sd_mounted ? state->music_status : "STOP";
+    music_text = state->music_file[0] != '\0' ? state->music_file : "NO MUSIC";
+    music_status = state->music_status[0] != '\0' ? state->music_status : "STOP";
     epaper_split_text_lines(music_text, 15, music_line1, sizeof(music_line1),
             music_line2, sizeof(music_line2));
     epaper_draw_text_at(4, 131, music_line1, true, 1);

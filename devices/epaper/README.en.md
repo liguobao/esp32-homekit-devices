@@ -11,7 +11,7 @@ Runtime behavior:
 - Reads the onboard `SHTC3` temperature and humidity sensor
 - Reads time from the onboard `PCF85063` RTC
 - Measures battery voltage and derives a battery percentage
-- Initializes the audio codec path for recording, recorded playback, and demo playback
+- Initializes the audio codec path for recording, recorded playback, and SD music playback with embedded-audio fallback
 - Mounts `Micro SD` for status snapshots and optional CSV logging
 - Uses the onboard `BOOT/PWR` buttons for record, playback, SD snapshot, reset, and sleep actions
 - Supports `RTC` timed wake and deep sleep
@@ -43,7 +43,7 @@ board support needed by `ES8311`, the speaker, the microphone, and the SD slot.
 - `BOOT` double click: play the latest recording
 - `BOOT` long release:
   longer than `3s` resets Wi-Fi, longer than `10s` resets to factory settings
-- `PWR` single click: play the built-in demo clip
+- `PWR` single click: play the first `mp3/wav` under `/sdcard/music`, or fall back to the embedded firmware audio when SD audio is unavailable
 - `PWR` double click: write `/sdcard/homekit-epaper-status.txt`
 - `PWR` long release: enter deep sleep and wake later via the configured `RTC` interval
 

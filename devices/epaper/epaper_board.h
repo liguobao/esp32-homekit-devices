@@ -41,6 +41,7 @@ typedef enum {
 esp_err_t epaper_board_init(void);
 esp_err_t epaper_board_shtc3_read(epaper_sensor_reading_t *reading);
 esp_err_t epaper_board_rtc_read(epaper_rtc_time_t *rtc_time);
+esp_err_t epaper_board_rtc_write_time(const epaper_rtc_time_t *rtc_time);
 esp_err_t epaper_board_rtc_alarm_set_after_seconds(uint32_t seconds);
 esp_err_t epaper_board_rtc_alarm_reset(void);
 bool epaper_board_rtc_alarm_active(void);

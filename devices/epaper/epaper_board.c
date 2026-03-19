@@ -550,6 +550,17 @@ esp_err_t epaper_board_rtc_read(epaper_rtc_time_t *rtc_time)
     return epaper_board_rtc_read_internal(rtc_time);
 }
 
+esp_err_t epaper_board_rtc_write_time(const epaper_rtc_time_t *rtc_time)
+{
+    if (!rtc_time) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_initialized) {
+        ESP_RETURN_ON_ERROR(epaper_board_init(), TAG, "board init failed");
+    }
+    return epaper_board_rtc_write(rtc_time);
+}
+
 bool epaper_board_rtc_alarm_active(void)
 {
     uint8_t ctrl2 = 0;

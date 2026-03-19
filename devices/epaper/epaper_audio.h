@@ -24,9 +24,9 @@ size_t epaper_audio_get_recorded_bytes(void);
 esp_err_t epaper_audio_record(void);
 esp_err_t epaper_audio_play_recorded(void);
 esp_err_t epaper_audio_play_demo(void);
-esp_err_t epaper_audio_toggle_sd_music(void);
+esp_err_t epaper_audio_toggle_music(void);
 esp_err_t epaper_audio_stop_playback(void);
-bool epaper_audio_is_sd_music_playing(void);
+bool epaper_audio_is_music_playing(void);
 void epaper_audio_get_music_info(char *file_name, size_t file_name_len,
         char *status_text, size_t status_text_len);
 

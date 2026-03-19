@@ -4,3 +4,8 @@ sdkconfig
 sdkconfig.old
 dependencies.lock
 sdkconfig.defaults.local
+
+# Local source audio assets used to generate embedded firmware audio
+/*.mp3
+/*.wav
+/tmp

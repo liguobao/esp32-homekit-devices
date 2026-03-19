@@ -31,6 +31,8 @@ static const char *TAG = "epaper_audio";
 #define EPAPER_AUDIO_STATUS_LEN 16
 #define EPAPER_AUDIO_READ_SIZE 1024
 #define EPAPER_AUDIO_OUT_SIZE 4096
+#define EPAPER_AUDIO_EMBEDDED_FILE_NAME "HOTEL-60S.MP3"
+#define EPAPER_AUDIO_MUSIC_OUT_VOL 80.0f
 
 static esp_codec_dev_handle_t s_playback;
 static esp_codec_dev_handle_t s_record;
@@ -47,11 +49,31 @@ static volatile bool s_music_stop_requested;
 static bool s_decoder_registered;
 static char s_music_file[EPAPER_AUDIO_FILE_LABEL_LEN] = "NO MUSIC";
 static char s_music_status[EPAPER_AUDIO_STATUS_LEN] = "STOP";
+static esp_audio_simple_dec_type_t s_selected_music_decoder;
 static char s_selected_music_path[EPAPER_AUDIO_FILE_PATH_LEN];
 static char s_selected_music_file[EPAPER_AUDIO_FILE_LABEL_LEN];
 
-extern const uint8_t epaper_canon_pcm_start[] asm("_binary_canon_pcm_start");
-extern const uint8_t epaper_canon_pcm_end[] asm("_binary_canon_pcm_end");
+typedef enum {
+    EPAPER_AUDIO_SOURCE_NONE = 0,
+    EPAPER_AUDIO_SOURCE_SD,
+    EPAPER_AUDIO_SOURCE_EMBEDDED,
+} epaper_audio_source_t;
+
+typedef struct {
+    epaper_audio_source_t source;
+    esp_audio_simple_dec_type_t decoder_type;
+    char path[EPAPER_AUDIO_FILE_PATH_LEN];
+    char file_name[EPAPER_AUDIO_FILE_LABEL_LEN];
+    const uint8_t *data;
+    size_t data_len;
+} epaper_audio_track_t;
+
+static epaper_audio_source_t s_selected_music_source;
+
+extern const uint8_t embedded_music_mp3_start[] asm("_binary_embedded_music_mp3_start");
+extern const uint8_t embedded_music_mp3_end[] asm("_binary_embedded_music_mp3_end");
+
+static void epaper_audio_music_task(void *arg);
 
 static SemaphoreHandle_t epaper_audio_get_lock(void)
 {
@@ -163,6 +185,28 @@ static esp_err_t epaper_audio_open_record_handle(void)
     return ESP_OK;
 }
 
+static esp_err_t epaper_audio_release_record_handle_for_playback(
+        const esp_codec_dev_sample_info_t *sample_info)
+{
+    esp_codec_dev_sample_info_t record_info = epaper_audio_default_sample_info();
+
+    if (!sample_info || !s_record_open) {
+        return ESP_OK;
+    }
+    if (sample_info->sample_rate == record_info.sample_rate &&
+            sample_info->channel == record_info.channel &&
+            sample_info->bits_per_sample == record_info.bits_per_sample) {
+        return ESP_OK;
+    }
+    if (esp_codec_dev_close(s_record) != ESP_CODEC_DEV_OK) {
+        return ESP_FAIL;
+    }
+    s_record_open = false;
+    ESP_LOGI(TAG, "Closed record path for playback rate %u Hz",
+            (unsigned) sample_info->sample_rate);
+    return ESP_OK;
+}
+
 static esp_err_t epaper_audio_prepare_playback(
         const esp_codec_dev_sample_info_t *sample_info)
 {
@@ -184,6 +228,9 @@ static esp_err_t epaper_audio_prepare_playback(
     }
     target_info.channel_mask = 0;
     target_info.mclk_multiple = 0;
+
+    ESP_RETURN_ON_ERROR(epaper_audio_release_record_handle_for_playback(&target_info),
+            TAG, "record path release failed");
 
     if (s_playback_open &&
             memcmp(&s_playback_sample_info, &target_info,
@@ -272,6 +319,34 @@ static esp_audio_simple_dec_type_t epaper_audio_get_decoder_type(const char *pat
     return ESP_AUDIO_SIMPLE_DEC_TYPE_NONE;
 }
 
+static size_t epaper_audio_embedded_music_len(void)
+{
+    return (size_t) (embedded_music_mp3_end - embedded_music_mp3_start);
+}
+
+static esp_err_t epaper_audio_select_embedded_music(epaper_audio_track_t *track)
+{
+    size_t data_len;
+
+    if (!track) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(track, 0, sizeof(*track));
+    data_len = epaper_audio_embedded_music_len();
+    if (data_len == 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    track->source = EPAPER_AUDIO_SOURCE_EMBEDDED;
+    track->decoder_type = ESP_AUDIO_SIMPLE_DEC_TYPE_MP3;
+    track->data = embedded_music_mp3_start;
+    track->data_len = data_len;
+    snprintf(track->file_name, sizeof(track->file_name), "%s",
+            EPAPER_AUDIO_EMBEDDED_FILE_NAME);
+    return ESP_OK;
+}
+
 static esp_err_t epaper_audio_find_music_file(char *path_out, size_t path_out_len,
         char *label_out, size_t label_out_len)
 {
@@ -290,13 +365,11 @@ static esp_err_t epaper_audio_find_music_file(char *path_out, size_t path_out_le
 
     if (!epaper_board_sd_is_mounted() &&
             epaper_board_sd_mount() != ESP_OK) {
-        epaper_audio_set_music_info("NO SD CARD", "STOP");
         return ESP_ERR_NOT_FOUND;
     }
 
     directory = opendir(EPAPER_AUDIO_MUSIC_DIR);
     if (!directory) {
-        epaper_audio_set_music_info("NO MUSIC", "STOP");
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -329,7 +402,6 @@ static esp_err_t epaper_audio_find_music_file(char *path_out, size_t path_out_le
     closedir(directory);
 
     if (!found) {
-        epaper_audio_set_music_info("NO MUSIC", "STOP");
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -337,17 +409,72 @@ static esp_err_t epaper_audio_find_music_file(char *path_out, size_t path_out_le
     return ESP_OK;
 }
 
-static void epaper_audio_copy_selected_music(char *path, size_t path_len,
-        char *file_name, size_t file_name_len)
+static esp_err_t epaper_audio_select_music(epaper_audio_track_t *track)
 {
+    esp_err_t err;
+
+    if (!track) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(track, 0, sizeof(*track));
+    err = epaper_audio_find_music_file(track->path, sizeof(track->path),
+            track->file_name, sizeof(track->file_name));
+    if (err == ESP_OK) {
+        track->source = EPAPER_AUDIO_SOURCE_SD;
+        track->decoder_type = epaper_audio_get_decoder_type(track->path);
+        return track->decoder_type == ESP_AUDIO_SIMPLE_DEC_TYPE_NONE ?
+                ESP_ERR_NOT_SUPPORTED : ESP_OK;
+    }
+
+    return epaper_audio_select_embedded_music(track);
+}
+
+static void epaper_audio_copy_selected_music(epaper_audio_track_t *track)
+{
+    if (!track) {
+        return;
+    }
+
+    memset(track, 0, sizeof(*track));
     epaper_audio_lock();
-    if (path && path_len > 0) {
-        snprintf(path, path_len, "%s", s_selected_music_path);
-    }
-    if (file_name && file_name_len > 0) {
-        snprintf(file_name, file_name_len, "%s", s_selected_music_file);
-    }
+    track->source = s_selected_music_source;
+    track->decoder_type = s_selected_music_decoder;
+    snprintf(track->path, sizeof(track->path), "%s", s_selected_music_path);
+    snprintf(track->file_name, sizeof(track->file_name), "%s",
+            s_selected_music_file);
     epaper_audio_unlock();
+
+    if (track->source == EPAPER_AUDIO_SOURCE_EMBEDDED) {
+        track->data = embedded_music_mp3_start;
+        track->data_len = epaper_audio_embedded_music_len();
+    }
+}
+
+static esp_err_t epaper_audio_start_music_task(const epaper_audio_track_t *track)
+{
+    if (!track) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    epaper_audio_lock();
+    s_selected_music_source = track->source;
+    s_selected_music_decoder = track->decoder_type;
+    snprintf(s_selected_music_path, sizeof(s_selected_music_path), "%s",
+            track->path);
+    snprintf(s_selected_music_file, sizeof(s_selected_music_file), "%s",
+            track->file_name);
+    s_music_stop_requested = false;
+    epaper_audio_set_music_info_locked(track->file_name, "LOAD");
+    epaper_audio_unlock();
+
+    if (xTaskCreate(epaper_audio_music_task, "ep_music", 10 * 1024,
+                NULL, 3, NULL) != pdPASS) {
+        epaper_audio_set_music_info(track->file_name, "ERR");
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
 }
 
 static bool epaper_audio_music_stop_requested(void)
@@ -357,28 +484,28 @@ static bool epaper_audio_music_stop_requested(void)
 
 static void epaper_audio_music_task(void *arg)
 {
-    char file_path[EPAPER_AUDIO_FILE_PATH_LEN];
-    char file_name[EPAPER_AUDIO_FILE_LABEL_LEN];
+    epaper_audio_track_t track;
     FILE *file = NULL;
     uint8_t *in_buf = NULL;
     uint8_t *out_buf = NULL;
     esp_audio_simple_dec_handle_t decoder = NULL;
-    esp_audio_simple_dec_type_t decoder_type;
     esp_audio_err_t audio_ret = ESP_AUDIO_ERR_OK;
     esp_err_t err = ESP_OK;
     int out_buf_size = EPAPER_AUDIO_OUT_SIZE;
     bool finished_ok = false;
     bool stopped = false;
+    size_t embedded_offset = 0;
+    bool sample_info_logged = false;
 
     (void) arg;
 
-    epaper_audio_copy_selected_music(file_path, sizeof(file_path),
-            file_name, sizeof(file_name));
+    epaper_audio_copy_selected_music(&track);
 
     epaper_audio_lock();
     s_music_task = xTaskGetCurrentTaskHandle();
-    s_audio_state = EPAPER_AUDIO_STATE_PLAYING_SD;
-    epaper_audio_set_music_info_locked(file_name, "LOAD");
+    s_audio_state = track.source == EPAPER_AUDIO_SOURCE_EMBEDDED ?
+            EPAPER_AUDIO_STATE_PLAYING_DEMO : EPAPER_AUDIO_STATE_PLAYING_SD;
+    epaper_audio_set_music_info_locked(track.file_name, "LOAD");
     epaper_audio_unlock();
 
     do {
@@ -396,15 +523,19 @@ static void epaper_audio_music_task(void *arg)
             break;
         }
 
-        decoder_type = epaper_audio_get_decoder_type(file_path);
-        if (decoder_type == ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
+        if (track.decoder_type == ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
             err = ESP_ERR_NOT_SUPPORTED;
             break;
         }
-        decoder_cfg.dec_type = decoder_type;
+        decoder_cfg.dec_type = track.decoder_type;
 
-        file = fopen(file_path, "rb");
-        if (!file) {
+        if (track.source == EPAPER_AUDIO_SOURCE_SD) {
+            file = fopen(track.path, "rb");
+            if (!file) {
+                err = ESP_ERR_NOT_FOUND;
+                break;
+            }
+        } else if (!track.data || track.data_len == 0) {
             err = ESP_ERR_NOT_FOUND;
             break;
         }
@@ -423,14 +554,32 @@ static void epaper_audio_music_task(void *arg)
             break;
         }
 
-        epaper_audio_set_music_info(file_name, "PLAY");
+        epaper_audio_set_music_info(track.file_name, "PLAY");
 
         while (!epaper_audio_music_stop_requested()) {
-            size_t read_len = fread(in_buf, 1, EPAPER_AUDIO_READ_SIZE, file);
+            size_t read_len;
+            bool eos;
+
+            if (track.source == EPAPER_AUDIO_SOURCE_SD) {
+                read_len = fread(in_buf, 1, EPAPER_AUDIO_READ_SIZE, file);
+                eos = read_len < EPAPER_AUDIO_READ_SIZE;
+            } else {
+                size_t remaining = track.data_len - embedded_offset;
+
+                if (remaining > EPAPER_AUDIO_READ_SIZE) {
+                    remaining = EPAPER_AUDIO_READ_SIZE;
+                }
+                if (remaining > 0) {
+                    memcpy(in_buf, track.data + embedded_offset, remaining);
+                    embedded_offset += remaining;
+                }
+                read_len = remaining;
+                eos = embedded_offset >= track.data_len;
+            }
             esp_audio_simple_dec_raw_t raw = {
                 .buffer = in_buf,
                 .len = (uint32_t) read_len,
-                .eos = read_len < EPAPER_AUDIO_READ_SIZE,
+                .eos = eos,
             };
 
             if (read_len == 0) {
@@ -457,7 +606,7 @@ static void epaper_audio_music_task(void *arg)
                     continue;
                 }
                 if (audio_ret != ESP_AUDIO_ERR_OK) {
-                    ESP_LOGE(TAG, "Decode %s failed: %d", file_name, audio_ret);
+                    ESP_LOGE(TAG, "Decode %s failed: %d", track.file_name, audio_ret);
                     err = ESP_FAIL;
                     break;
                 }
@@ -483,6 +632,15 @@ static void epaper_audio_music_task(void *arg)
                                 esp_err_to_name(err));
                         break;
                     }
+                    if (!sample_info_logged) {
+                        ESP_LOGI(TAG, "Music stream %s: %u Hz, %u ch, %u bits",
+                                track.file_name,
+                                (unsigned) sample_info.sample_rate,
+                                (unsigned) sample_info.channel,
+                                (unsigned) sample_info.bits_per_sample);
+                        sample_info_logged = true;
+                    }
+                    esp_codec_dev_set_out_vol(s_playback, EPAPER_AUDIO_MUSIC_OUT_VOL);
 
                     if (esp_codec_dev_write(s_playback, out_frame.buffer,
                                 (int) out_frame.decoded_size) != ESP_CODEC_DEV_OK) {
@@ -518,13 +676,14 @@ static void epaper_audio_music_task(void *arg)
     epaper_audio_lock();
     s_music_task = NULL;
     s_music_stop_requested = false;
-    if (s_audio_state == EPAPER_AUDIO_STATE_PLAYING_SD) {
+    if (s_audio_state == EPAPER_AUDIO_STATE_PLAYING_SD ||
+            s_audio_state == EPAPER_AUDIO_STATE_PLAYING_DEMO) {
         s_audio_state = EPAPER_AUDIO_STATE_READY;
     }
     if (stopped || finished_ok) {
-        epaper_audio_set_music_info_locked(file_name, "STOP");
+        epaper_audio_set_music_info_locked(track.file_name, "STOP");
     } else {
-        epaper_audio_set_music_info_locked(file_name, "ERR");
+        epaper_audio_set_music_info_locked(track.file_name, "ERR");
     }
     epaper_audio_unlock();
 
@@ -735,17 +894,11 @@ fail:
 
 esp_err_t epaper_audio_play_demo(void)
 {
-    const uint8_t *data = epaper_canon_pcm_start;
-    size_t total_len = (size_t) (epaper_canon_pcm_end - epaper_canon_pcm_start);
-    size_t offset = 0;
+    epaper_audio_track_t track;
     esp_err_t err;
-    esp_codec_dev_sample_info_t sample_info = epaper_audio_default_sample_info();
 
     if (!epaper_audio_is_ready()) {
         ESP_RETURN_ON_ERROR(epaper_audio_init(), TAG, "audio init failed");
-    }
-    if (total_len == 0) {
-        return ESP_ERR_INVALID_SIZE;
     }
 
     epaper_audio_lock();
@@ -753,46 +906,19 @@ esp_err_t epaper_audio_play_demo(void)
         epaper_audio_unlock();
         return ESP_ERR_INVALID_STATE;
     }
-    s_audio_state = EPAPER_AUDIO_STATE_PLAYING_DEMO;
     epaper_audio_unlock();
 
-    err = epaper_audio_prepare_playback(&sample_info);
+    err = epaper_audio_select_embedded_music(&track);
     if (err != ESP_OK) {
-        goto fail;
+        return err == ESP_ERR_NOT_FOUND ? ESP_ERR_INVALID_SIZE : err;
     }
 
-    esp_codec_dev_set_out_vol(s_playback, 90.0f);
-    while (offset < total_len) {
-        size_t chunk = total_len - offset;
-
-        if (chunk > 256) {
-            chunk = 256;
-        }
-        if (esp_codec_dev_write(s_playback, (void *) (data + offset),
-                    (int) chunk) != ESP_CODEC_DEV_OK) {
-            err = ESP_FAIL;
-            goto fail;
-        }
-        offset += chunk;
-    }
-    esp_codec_dev_set_out_vol(s_playback, 80.0f);
-
-    epaper_audio_lock();
-    s_audio_state = EPAPER_AUDIO_STATE_READY;
-    epaper_audio_unlock();
-    return ESP_OK;
-
-fail:
-    epaper_audio_lock();
-    s_audio_state = EPAPER_AUDIO_STATE_ERROR;
-    epaper_audio_unlock();
-    return err;
+    return epaper_audio_start_music_task(&track);
 }
 
-esp_err_t epaper_audio_toggle_sd_music(void)
+esp_err_t epaper_audio_toggle_music(void)
 {
-    char music_path[EPAPER_AUDIO_FILE_PATH_LEN];
-    char music_file[EPAPER_AUDIO_FILE_LABEL_LEN];
+    epaper_audio_track_t track;
     esp_err_t err;
 
     if (!epaper_audio_is_ready()) {
@@ -808,27 +934,14 @@ esp_err_t epaper_audio_toggle_sd_music(void)
     }
     epaper_audio_unlock();
 
-    err = epaper_audio_find_music_file(music_path, sizeof(music_path),
-            music_file, sizeof(music_file));
+    err = epaper_audio_select_music(&track);
     if (err != ESP_OK) {
+        epaper_audio_set_music_info(epaper_board_sd_is_mounted() ?
+                "NO MUSIC" : "NO SD/FW", "STOP");
         return err;
     }
 
-    epaper_audio_lock();
-    snprintf(s_selected_music_path, sizeof(s_selected_music_path), "%s",
-            music_path);
-    snprintf(s_selected_music_file, sizeof(s_selected_music_file), "%s",
-            music_file);
-    s_music_stop_requested = false;
-    epaper_audio_set_music_info_locked(music_file, "LOAD");
-    epaper_audio_unlock();
-
-    if (xTaskCreate(epaper_audio_music_task, "ep_music", 10 * 1024,
-                NULL, 3, NULL) != pdPASS) {
-        epaper_audio_set_music_info(music_file, "ERR");
-        return ESP_ERR_NO_MEM;
-    }
-    return ESP_OK;
+    return epaper_audio_start_music_task(&track);
 }
 
 esp_err_t epaper_audio_stop_playback(void)
@@ -844,13 +957,14 @@ esp_err_t epaper_audio_stop_playback(void)
     return ESP_OK;
 }
 
-bool epaper_audio_is_sd_music_playing(void)
+bool epaper_audio_is_music_playing(void)
 {
     bool playing;
 
     epaper_audio_lock();
     playing = s_music_task != NULL &&
-            s_audio_state == EPAPER_AUDIO_STATE_PLAYING_SD;
+            (s_audio_state == EPAPER_AUDIO_STATE_PLAYING_SD ||
+            s_audio_state == EPAPER_AUDIO_STATE_PLAYING_DEMO);
     epaper_audio_unlock();
     return playing;
 }

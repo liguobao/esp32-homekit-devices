@@ -1,10 +1,13 @@
 #include "epaper_device.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "esp_log.h"
+#include "esp_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -29,6 +32,8 @@ static hap_char_t *s_low_battery_char;
 static QueueHandle_t s_button_queue;
 static bool s_runtime_started;
 static char s_status_text[32] = "BOOT READY";
+static bool s_sntp_started;
+static bool s_rtc_synced_from_network;
 
 static int epaper_identify(hap_acc_t *ha)
 {
@@ -44,6 +49,84 @@ static void epaper_set_status(const char *status)
         return;
     }
     snprintf(s_status_text, sizeof(s_status_text), "%s", status);
+}
+
+static bool epaper_system_time_valid(void)
+{
+    time_t now;
+    struct tm time_info = { 0 };
+
+    time(&now);
+    if (now <= 0) {
+        return false;
+    }
+    if (!localtime_r(&now, &time_info)) {
+        return false;
+    }
+    return time_info.tm_year >= (2024 - 1900);
+}
+
+static void epaper_start_sntp_if_needed(void)
+{
+    if (s_sntp_started) {
+        return;
+    }
+
+    setenv("TZ", CONFIG_HOMEKIT_EPAPER_TIMEZONE, 1);
+    tzset();
+    esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "ntp.aliyun.com");
+    esp_sntp_setservername(1, "cn.pool.ntp.org");
+    esp_sntp_setservername(2, "pool.ntp.org");
+    esp_sntp_init();
+    s_sntp_started = true;
+    ESP_LOGI(TAG, "SNTP started for RTC sync");
+}
+
+static void epaper_try_sync_rtc_from_network(void)
+{
+    wifi_ap_record_t ap_info = { 0 };
+    epaper_rtc_time_t rtc_time;
+    time_t now;
+    struct tm time_info = { 0 };
+
+    if (s_rtc_synced_from_network) {
+        return;
+    }
+    if (esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK) {
+        return;
+    }
+
+    epaper_start_sntp_if_needed();
+    if (!epaper_system_time_valid()) {
+        return;
+    }
+
+    time(&now);
+    if (now <= 0 || !localtime_r(&now, &time_info)) {
+        return;
+    }
+
+    rtc_time.year = time_info.tm_year + 1900;
+    rtc_time.month = time_info.tm_mon + 1;
+    rtc_time.day = time_info.tm_mday;
+    rtc_time.hour = time_info.tm_hour;
+    rtc_time.minute = time_info.tm_min;
+    rtc_time.second = time_info.tm_sec;
+    rtc_time.weekday = time_info.tm_wday;
+
+    if (epaper_board_rtc_write_time(&rtc_time) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to write SNTP time back to RTC");
+        return;
+    }
+
+    if (s_sntp_started) {
+        esp_sntp_stop();
+    }
+    s_rtc_synced_from_network = true;
+    ESP_LOGI(TAG, "RTC synced from network: %04d/%02d/%02d %02d:%02d:%02d",
+            rtc_time.year, rtc_time.month, rtc_time.day,
+            rtc_time.hour, rtc_time.minute, rtc_time.second);
 }
 
 static uint8_t epaper_wifi_score_from_rssi(int8_t rssi)
@@ -236,6 +319,7 @@ static void epaper_refresh_dashboard(bool append_sd_log)
 {
     epaper_dashboard_state_t state;
 
+    epaper_try_sync_rtc_from_network();
     epaper_collect_dashboard_state(&state);
     epaper_update_homekit(&state);
     epaper_display_show_dashboard(&state);
@@ -311,11 +395,11 @@ static void epaper_handle_button_event(const epaper_button_event_t *event)
 
     case EPAPER_BUTTON_EVENT_PWR_SINGLE:
     {
-        bool was_playing = epaper_audio_is_sd_music_playing();
+        bool was_playing = epaper_audio_is_music_playing();
 
         epaper_set_status(was_playing ? "MUSIC STOP" : "MUSIC PLAY");
         epaper_refresh_dashboard(false);
-        err = epaper_audio_toggle_sd_music();
+        err = epaper_audio_toggle_music();
         if (err == ESP_OK) {
             epaper_set_status(was_playing ? "MUSIC STOP" : "MUSIC PLAY");
         } else if (err == ESP_ERR_NOT_FOUND) {
