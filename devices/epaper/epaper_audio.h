@@ -24,6 +24,7 @@ size_t epaper_audio_get_recorded_bytes(void);
 esp_err_t epaper_audio_record(void);
 esp_err_t epaper_audio_play_recorded(void);
 esp_err_t epaper_audio_play_demo(void);
+esp_err_t epaper_audio_start_music(void);
 esp_err_t epaper_audio_toggle_music(void);
 esp_err_t epaper_audio_stop_playback(void);
 bool epaper_audio_is_music_playing(void);

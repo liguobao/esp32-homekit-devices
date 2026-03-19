@@ -70,7 +70,11 @@ static void fill_accessory_identity(const homekit_device_t *device,
 {
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    snprintf(name, name_size, "%s-%02X%02X", device->name_prefix, mac[4], mac[5]);
+    if (device && device->fixed_name && device->fixed_name[0] != '\0') {
+        snprintf(name, name_size, "%s", device->fixed_name);
+    } else {
+        snprintf(name, name_size, "%s-%02X%02X", device->name_prefix, mac[4], mac[5]);
+    }
     snprintf(serial_num, serial_size, "%02X%02X%02X%02X%02X%02X",
             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }

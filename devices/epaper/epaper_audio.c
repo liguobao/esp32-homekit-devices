@@ -465,7 +465,7 @@ static esp_err_t epaper_audio_start_music_task(const epaper_audio_track_t *track
     snprintf(s_selected_music_file, sizeof(s_selected_music_file), "%s",
             track->file_name);
     s_music_stop_requested = false;
-    epaper_audio_set_music_info_locked(track->file_name, "LOAD");
+    epaper_audio_set_music_info_locked(track->file_name, "PLAY");
     epaper_audio_unlock();
 
     if (xTaskCreate(epaper_audio_music_task, "ep_music", 10 * 1024,
@@ -505,7 +505,7 @@ static void epaper_audio_music_task(void *arg)
     s_music_task = xTaskGetCurrentTaskHandle();
     s_audio_state = track.source == EPAPER_AUDIO_SOURCE_EMBEDDED ?
             EPAPER_AUDIO_STATE_PLAYING_DEMO : EPAPER_AUDIO_STATE_PLAYING_SD;
-    epaper_audio_set_music_info_locked(track.file_name, "LOAD");
+    epaper_audio_set_music_info_locked(track.file_name, "PLAY");
     epaper_audio_unlock();
 
     do {
@@ -553,8 +553,6 @@ static void epaper_audio_music_task(void *arg)
             err = ESP_FAIL;
             break;
         }
-
-        epaper_audio_set_music_info(track.file_name, "PLAY");
 
         while (!epaper_audio_music_stop_requested()) {
             size_t read_len;
@@ -916,7 +914,7 @@ esp_err_t epaper_audio_play_demo(void)
     return epaper_audio_start_music_task(&track);
 }
 
-esp_err_t epaper_audio_toggle_music(void)
+esp_err_t epaper_audio_start_music(void)
 {
     epaper_audio_track_t track;
     esp_err_t err;
@@ -927,8 +925,6 @@ esp_err_t epaper_audio_toggle_music(void)
 
     epaper_audio_lock();
     if (s_music_task) {
-        s_music_stop_requested = true;
-        epaper_audio_set_music_info_locked(NULL, "STOP");
         epaper_audio_unlock();
         return ESP_OK;
     }
@@ -942,6 +938,14 @@ esp_err_t epaper_audio_toggle_music(void)
     }
 
     return epaper_audio_start_music_task(&track);
+}
+
+esp_err_t epaper_audio_toggle_music(void)
+{
+    if (epaper_audio_is_music_playing()) {
+        return epaper_audio_stop_playback();
+    }
+    return epaper_audio_start_music();
 }
 
 esp_err_t epaper_audio_stop_playback(void)

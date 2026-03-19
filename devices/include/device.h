@@ -6,6 +6,7 @@
 #include <hap.h>
 
 typedef struct {
+    const char *fixed_name;
     char *name_prefix;
     char *manufacturer;
     char *model;

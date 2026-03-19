@@ -31,5 +31,9 @@ typedef struct {
 esp_err_t epaper_display_init(void);
 void epaper_display_show_boot(void);
 void epaper_display_show_dashboard(const epaper_dashboard_state_t *state);
+void epaper_display_refresh_clock(const epaper_rtc_time_t *rtc_time, bool rtc_valid);
+void epaper_display_refresh_sensor_block(const epaper_dashboard_state_t *state);
+void epaper_display_refresh_music_block(const epaper_dashboard_state_t *state);
+void epaper_display_refresh_power_block(const epaper_dashboard_state_t *state);
 
 #endif /* EPAPER_DISPLAY_H_ */
